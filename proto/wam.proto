@@ -1,0 +1,253 @@
+syntax = "proto3";
+
+package wam.rpc.v1;
+
+enum DType {
+  DTYPE_UNSPECIFIED = 0;
+  DTYPE_U8 = 1;
+  DTYPE_I32 = 2;
+  DTYPE_F32 = 3;
+  DTYPE_BF16 = 4;
+}
+
+enum ByteOrder {
+  BYTE_ORDER_UNSPECIFIED = 0;
+  BYTE_ORDER_LITTLE = 1;
+  BYTE_ORDER_BIG = 2;
+  BYTE_ORDER_NOT_APPLICABLE = 3;
+}
+
+enum ImageEncoding {
+  IMAGE_ENCODING_UNSPECIFIED = 0;
+  IMAGE_ENCODING_RGB_U8 = 1;
+  IMAGE_ENCODING_PNG = 2;
+  IMAGE_ENCODING_JPEG = 3;
+}
+
+enum ErrorCode {
+  ERROR_CODE_OK = 0;
+  ERROR_CODE_INVALID_ARGUMENT = 1;
+  ERROR_CODE_NOT_FOUND = 2;
+  ERROR_CODE_UNSUPPORTED = 3;
+  ERROR_CODE_INCOMPATIBLE_ARTIFACT = 4;
+  ERROR_CODE_RESOURCE_EXHAUSTED = 5;
+  ERROR_CODE_FAILED_PRECONDITION = 6;
+  ERROR_CODE_INFERENCE_FAILED = 7;
+  ERROR_CODE_INTERNAL = 8;
+}
+
+enum Backend {
+  BACKEND_UNSPECIFIED = 0;
+  BACKEND_AUTO = 1;
+  BACKEND_CUDA = 2;
+  BACKEND_CPU_METADATA = 3;
+}
+
+enum Precision {
+  PRECISION_UNSPECIFIED = 0;
+  PRECISION_F32_REFERENCE = 1;
+  PRECISION_BF16_LATENCY = 2;
+}
+
+enum LanguageEncoderPolicy {
+  LANGUAGE_ENCODER_POLICY_RESIDENT = 0;
+  LANGUAGE_ENCODER_POLICY_FIXED = 1;
+  LANGUAGE_ENCODER_POLICY_EXTERNAL_EMBEDDING = 2;
+}
+
+enum PrefixCachePolicy {
+  PREFIX_CACHE_POLICY_UNSPECIFIED = 0;
+  PREFIX_CACHE_POLICY_ENABLED = 1;
+  PREFIX_CACHE_POLICY_DISABLED = 2;
+}
+
+message Version {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+message Tensor {
+  DType dtype = 1;
+  repeated uint64 shape = 2;
+  string layout = 3;
+  ByteOrder byte_order = 4;
+  bytes data = 5;
+}
+
+message NamedTensor {
+  string name = 1;
+  Tensor tensor = 2;
+}
+
+message Image {
+  string name = 1;
+  ImageEncoding encoding = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 channels = 5;
+  uint64 row_stride_bytes = 6;
+  bytes data = 7;
+}
+
+message TokenInput {
+  repeated int32 token_ids = 1;
+  repeated int32 attention_mask = 2;
+}
+
+message PrecomputedEmbedding {
+  Tensor embedding = 1;
+  Tensor attention_mask = 2;
+}
+
+message LanguageInput {
+  oneof source {
+    TokenInput tokens = 1;
+    PrecomputedEmbedding precomputed_embedding = 2;
+  }
+}
+
+message Inputs {
+  repeated Image images = 1;
+  LanguageInput language = 2;
+  Tensor state = 3;
+  Tensor noise = 4;
+  repeated NamedTensor history = 5;
+}
+
+message PhaseTiming {
+  string name = 1;
+  double milliseconds = 2;
+}
+
+message Stats {
+  double preprocess_milliseconds = 1;
+  double vae_milliseconds = 2;
+  double text_encoder_milliseconds = 3;
+  double prompt_projection_milliseconds = 4;
+  double prefix_milliseconds = 5;
+  double denoise_milliseconds = 6;
+  double postprocess_milliseconds = 7;
+  double total_milliseconds = 8;
+  repeated double denoise_step_milliseconds = 9;
+  repeated PhaseTiming additional_timings = 10;
+  bool prompt_cache_hit = 11;
+  bool projected_prompt_cache_hit = 12;
+  uint64 peak_device_memory_bytes = 13;
+}
+
+message Prediction {
+  Tensor action = 1;
+  repeated NamedTensor auxiliary = 2;
+  Stats stats = 3;
+}
+
+message ErrorDetail {
+  string field = 1;
+  string reason = 2;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  repeated ErrorDetail details = 3;
+}
+
+message Capabilities {
+  bool action = 1;
+  bool auxiliary_outputs = 2;
+  bool raw_images = 3;
+  bool token_input = 4;
+  bool precomputed_embedding = 5;
+  bool explicit_noise = 6;
+  bool batch_inference = 7;
+  bool concurrent_sessions = 8;
+  repeated Backend backends = 9;
+  repeated Precision precisions = 10;
+  bool arbitrary_token_input = 11;
+  bool fixed_token_input = 12;
+}
+
+message RuntimeComponentInfo {
+  string name = 1;
+  bool loaded = 2;
+  uint64 device_bytes = 3;
+  double load_milliseconds = 4;
+  double unload_milliseconds = 5;
+}
+
+message ArtifactComponentInfo {
+  string name = 1;
+  DType source_dtype = 2;
+  DType stored_dtype = 3;
+  uint64 tensor_count = 4;
+  uint64 elements = 5;
+  uint64 source_bytes = 6;
+  uint64 stored_bytes = 7;
+}
+
+message ModelInfo {
+  string architecture = 1;
+  string artifact_policy = 2;
+  string artifact_sha256 = 3;
+  uint64 artifact_bytes = 4;
+  Backend backend = 5;
+  Precision precision = 6;
+  Capabilities capabilities = 7;
+  Version runtime_version = 8;
+  Version protocol_version = 9;
+  uint32 artifact_schema_version = 10;
+  uint32 abi_version = 11;
+  repeated ArtifactComponentInfo artifact_components = 12;
+  LanguageEncoderPolicy language_encoder_policy = 13;
+  bool text_encoder_resident = 14;
+  uint64 resident_device_bytes = 15;
+  repeated RuntimeComponentInfo runtime_components = 16;
+  uint64 peak_component_device_bytes = 17;
+}
+
+message GetModelInfoRequest {}
+
+message GetModelInfoResponse {
+  ModelInfo model = 1;
+}
+
+message CreateSessionRequest {
+  // Unspecified uses the runtime default, which is enabled in v0.1.
+  PrefixCachePolicy prefix_cache = 1;
+}
+
+message CreateSessionResponse {
+  string session_id = 1;
+}
+
+message PredictRequest {
+  string session_id = 1;
+  uint64 request_id = 2;
+  Inputs inputs = 3;
+}
+
+message PredictResponse {
+  uint64 request_id = 1;
+  Prediction prediction = 2;
+}
+
+message ResetSessionRequest {
+  string session_id = 1;
+}
+
+message ResetSessionResponse {}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+
+message CloseSessionResponse {}
+
+service WamService {
+  rpc GetModelInfo(GetModelInfoRequest) returns (GetModelInfoResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc Predict(PredictRequest) returns (PredictResponse);
+  rpc ResetSession(ResetSessionRequest) returns (ResetSessionResponse);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+}

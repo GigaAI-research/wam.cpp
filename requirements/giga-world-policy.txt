@@ -1,0 +1,7 @@
+# Minimum versions for the wam.cpp compatibility adapter. Install the frozen
+# upstream giga-world-policy environment separately for its model/data stack.
+numpy>=1.24.0
+Pillow>=9.5.0
+protobuf>=4.25.0
+pyzmq>=25.1.0
+torch>=2.1.0

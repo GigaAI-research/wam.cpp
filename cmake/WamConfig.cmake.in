@@ -1,0 +1,23 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(OpenMP)
+if(@WAM_CUDA@)
+    find_dependency(CUDAToolkit)
+endif()
+if(@WAM_CUDNN@)
+    find_library(WAM_CUDNN_LIBRARY
+        NAMES cudnn libcudnn.so.9
+        HINTS ${CUDNN_ROOT} ENV CUDNN_ROOT
+        PATH_SUFFIXES lib lib64
+        REQUIRED)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/wamTargets.cmake")
+
+if(@WAM_CUDNN@)
+    set_property(TARGET wam::ggml-cuda APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES "${WAM_CUDNN_LIBRARY}")
+endif()
+
+check_required_components(wam)

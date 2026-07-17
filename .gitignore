@@ -1,0 +1,67 @@
+# CMake and build systems
+/build/
+/build-*/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+Makefile
+Testing/
+_deps/
+
+# Compiled outputs
+*.a
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Model and profiling artifacts
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.npz
+*.npy
+*.nsys-rep
+*.sqlite
+*.qdrep
+*.prof
+*.trace
+*.dump
+
+# Runtime output
+*.log
+core
+core.*
+/action*.f32
+/report*.json
+
+# Internal validation suites and captures are not part of this runtime release.
+/tests/
+/reports/
+
+# Editors and OS metadata
+.DS_Store
+.idea/
+.vscode/
+*~
+*.swp

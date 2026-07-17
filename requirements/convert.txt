@@ -1,0 +1,4 @@
+# gguf-py is supplied by the pinned llama.cpp b9866 source tree.
+numpy==1.26.4
+safetensors==0.5.3
+torch==2.7.1

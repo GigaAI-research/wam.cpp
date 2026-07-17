@@ -1,0 +1,103 @@
+diff --git a/scripts/run_inference_openloop_wam-cpp.sh b/scripts/run_inference_openloop_wam-cpp.sh
+new file mode 100755
+--- /dev/null
++++ b/scripts/run_inference_openloop_wam-cpp.sh
+@@ -0,0 +1,38 @@
++#!/usr/bin/env bash
++
++# Thin upstream entry point for the installed wam.cpp GWP-0.5 adapter.
++set -euo pipefail
++
++SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
++UPSTREAM_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
++
++die() {
++    printf 'run_inference_openloop_wam-cpp.sh: %s\n' "$*" >&2
++    exit 2
++}
++
++resolve_runner() {
++    if [[ -n "${WAM_CPP_RUNNER:-}" ]]; then
++        printf '%s\n' "${WAM_CPP_RUNNER}"
++        return
++    fi
++    if [[ -n "${WAM_INSTALL_PREFIX:-}" &&
++          -x "${WAM_INSTALL_PREFIX}/bin/run_inference_openloop_wam-cpp.sh" ]]; then
++        printf '%s\n' "${WAM_INSTALL_PREFIX}/bin/run_inference_openloop_wam-cpp.sh"
++        return
++    fi
++    command -v run_inference_openloop_wam-cpp.sh || true
++}
++
++runner="$(resolve_runner)"
++[[ -n "${runner}" ]] || die \
++    "installed wam.cpp launcher not found; set WAM_INSTALL_PREFIX or WAM_CPP_RUNNER"
++[[ -x "${runner}" ]] || die "wam.cpp launcher is not executable: ${runner}"
++
++runner_real="$(cd -- "$(dirname -- "${runner}")" && pwd -P)/$(basename -- "${runner}")"
++self_real="${SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]}")"
++[[ "${runner_real}" != "${self_real}" ]] || die \
++    "launcher resolved to this upstream shim; set WAM_INSTALL_PREFIX explicitly"
++
++export GIGA_WORLD_POLICY_ROOT="${GIGA_WORLD_POLICY_ROOT:-${UPSTREAM_ROOT}}"
++exec "${runner}" "$@"
+diff --git a/scripts/inference_openloop_wam_cpp.py b/scripts/inference_openloop_wam_cpp.py
+new file mode 100755
+--- /dev/null
++++ b/scripts/inference_openloop_wam_cpp.py
+@@ -0,0 +1,55 @@
++#!/usr/bin/env python3
++"""Forward directly to the adapter installed by wam.cpp."""
++
++from __future__ import annotations
++
++import os
++import shutil
++import sys
++from pathlib import Path
++
++
++ADAPTER_RELATIVE = Path("share/wam/integrations/giga-world-policy/inference_openloop_wam_cpp.py")
++
++
++def candidates() -> list[Path]:
++    result = []
++    explicit = os.environ.get("WAM_GWP_INSTALLED_ADAPTER")
++    if explicit:
++        result.append(Path(explicit))
++    prefix = os.environ.get("WAM_INSTALL_PREFIX")
++    if prefix:
++        result.append(Path(prefix) / ADAPTER_RELATIVE)
++    runner = shutil.which("run_inference_openloop_wam-cpp.sh")
++    if runner:
++        result.append(Path(runner).resolve().parent.parent / ADAPTER_RELATIVE)
++    result.append(Path(sys.prefix) / ADAPTER_RELATIVE)
++    return result
++
++
++def main() -> int:
++    current = Path(__file__).resolve()
++    adapter = next(
++        (candidate.resolve() for candidate in candidates()
++         if candidate.is_file() and candidate.resolve() != current),
++        None,
++    )
++    if adapter is None:
++        raise SystemExit(
++            "installed wam.cpp adapter not found; set WAM_INSTALL_PREFIX or "
++            "WAM_GWP_INSTALLED_ADAPTER"
++        )
++
++    arguments = sys.argv[1:]
++    has_upstream_root = any(
++        value == "--upstream-root" or value.startswith("--upstream-root=")
++        for value in arguments
++    )
++    if not has_upstream_root:
++        arguments = ["--upstream-root", str(current.parents[1]), *arguments]
++    os.execv(sys.executable, [sys.executable, str(adapter), *arguments])
++    return 127
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

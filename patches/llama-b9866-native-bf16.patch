@@ -1,0 +1,707 @@
+--- a/ggml/include/ggml.h	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/include/ggml.h	2026-07-14 16:13:22.046267000 +0800
+@@ -1420,6 +1420,43 @@
+             struct ggml_tensor  * a,
+             struct ggml_tensor  * b);
+ 
++    GGML_API struct ggml_tensor * ggml_mul_mat_out_type(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * a,
++            struct ggml_tensor  * b,
++            enum   ggml_type      type);
++
++    GGML_API struct ggml_tensor * ggml_gated_residual_bf16(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * hidden,
++            struct ggml_tensor  * branch,
++            struct ggml_tensor  * gate);
++
++    GGML_API struct ggml_tensor * ggml_bias_gelu_bf16(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * input,
++            struct ggml_tensor  * bias);
++
++    GGML_API struct ggml_tensor * ggml_norm_modulation_bf16(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * input,
++            struct ggml_tensor  * scale,
++            struct ggml_tensor  * shift,
++            float                 eps);
++
++    GGML_API struct ggml_tensor * ggml_layer_norm_bf16(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * input,
++            struct ggml_tensor  * weight,
++            struct ggml_tensor  * bias,
++            float                 eps);
++
++    GGML_API struct ggml_tensor * ggml_rms_norm_bf16_f32(
++            struct ggml_context * ctx,
++            struct ggml_tensor  * input,
++            struct ggml_tensor  * weight,
++            float                 eps);
++
+     // change the precision of a matrix multiplication
+     // set to GGML_PREC_F32 for higher precision (useful for phi-2)
+     GGML_API void ggml_mul_mat_set_prec(
+@@ -2738,6 +2775,7 @@
+     GGML_API struct ggml_tensor *  ggml_graph_node   (struct ggml_cgraph * cgraph, int i); // if i < 0, returns nodes[n_nodes + i]
+     GGML_API struct ggml_tensor ** ggml_graph_nodes  (struct ggml_cgraph * cgraph);
+     GGML_API int                   ggml_graph_n_nodes(struct ggml_cgraph * cgraph);
++    GGML_API void                  ggml_graph_assign_uid(struct ggml_cgraph * cgraph);
+ 
+     GGML_API void   ggml_graph_add_node(struct ggml_cgraph * cgraph, struct ggml_tensor * tensor);
+ 
+--- a/ggml/src/ggml-cuda/CMakeLists.txt	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/src/ggml-cuda/CMakeLists.txt	2026-07-14 21:06:59.377100000 +0800
+@@ -151,6 +151,15 @@
+         add_compile_definitions(GGML_CUDA_NO_FA)
+     endif()
+ 
++    option(GGML_CUDA_CUDNN "Use cuDNN for direct BF16 convolution" OFF)
++    if (GGML_CUDA_CUDNN)
++        find_path(CUDNN_INCLUDE_DIR cudnn.h REQUIRED)
++        find_library(CUDNN_LIBRARY cudnn REQUIRED)
++        target_include_directories(ggml-cuda PRIVATE ${CUDNN_INCLUDE_DIR})
++        target_link_libraries(ggml-cuda PRIVATE ${CUDNN_LIBRARY})
++        target_compile_definitions(ggml-cuda PRIVATE GGML_CUDA_CUDNN)
++    endif()
++
+     if (GGML_CUDA_NO_PEER_COPY)
+         add_compile_definitions(GGML_CUDA_NO_PEER_COPY)
+     endif()
+--- a/ggml/src/ggml-cuda/binbcast.cu	2026-07-14 16:05:29.037041780 +0800
++++ b/ggml/src/ggml-cuda/binbcast.cu	2026-07-14 20:58:35.241936000 +0800
+@@ -40,6 +40,20 @@
+     dst[row * ncols + col] = __fadd_rn(residual[row * residual_stride_row + col], scaled);
+ }
+ 
++template <typename gate_t>
++static __global__ void gated_residual_bf16(
++        const nv_bfloat16 * hidden, const nv_bfloat16 * branch, const gate_t * gate,
++        nv_bfloat16 * dst, const int ncols, const int64_t hidden_stride_row,
++        const int64_t branch_stride_row, const int64_t gate_stride_row) {
++    const int row = blockIdx.y;
++    const int col = blockIdx.x * blockDim.x + threadIdx.x;
++    if (col >= ncols) return;
++    const float value = __bfloat162float(hidden[row * hidden_stride_row + col]) +
++                        __bfloat162float(branch[row * branch_stride_row + col]) *
++                        (float) gate[row * gate_stride_row + col];
++    dst[row * ncols + col] = __float2bfloat16(value);
++}
++
+ template <float (*bin_op)(const float, const float),
+           typename src0_t,
+           typename src1_t,
+@@ -427,7 +441,8 @@
+     const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
+     const void * src0_dd, const void * src1_dd, void * dst_dd, cudaStream_t stream) {
+ 
+-    GGML_ASSERT(src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16);
++    GGML_ASSERT(src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16 ||
++                src1->type == GGML_TYPE_BF16);
+ 
+     if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
+         op()(src0, src1, dst, (const float *)src0_dd, (const float *)src1_dd, (float *)dst_dd, stream);
+@@ -437,6 +452,10 @@
+         op()(src0, src1, dst, (const half *) src0_dd, (const float *)src1_dd, (half *) dst_dd, stream);
+     } else if (src0->type == GGML_TYPE_F16 && dst->type == GGML_TYPE_F32) {
+         op()(src0, src1, dst, (const half *) src0_dd, (const float *)src1_dd, (float *)dst_dd, stream);
++    } else if (src0->type == GGML_TYPE_BF16 && src1->type == GGML_TYPE_BF16 &&
++               dst->type == GGML_TYPE_BF16) {
++        op()(src0, src1, dst, (const nv_bfloat16 *) src0_dd,
++             (const nv_bfloat16 *) src1_dd, (nv_bfloat16 *) dst_dd, stream);
+     } else {
+         fprintf(stderr, "%s: unsupported types: dst: %s, src0: %s, src1: %s\n", __func__,
+             ggml_type_name(dst->type), ggml_type_name(src0->type), ggml_type_name(src1->type));
+@@ -449,6 +468,37 @@
+ }
+ 
+ void ggml_cuda_op_add(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
++    if (dst->src[2]) {
++        const ggml_tensor * hidden = dst->src[0];
++        const ggml_tensor * branch = dst->src[1];
++        const ggml_tensor * gate = dst->src[2];
++        GGML_ASSERT(hidden->type == GGML_TYPE_BF16 && branch->type == GGML_TYPE_BF16 &&
++                    (gate->type == GGML_TYPE_F32 || gate->type == GGML_TYPE_BF16) &&
++                    dst->type == GGML_TYPE_BF16);
++        GGML_ASSERT(hidden->nb[0] == sizeof(nv_bfloat16) &&
++                    branch->nb[0] == sizeof(nv_bfloat16));
++        const dim3 block_dims(256, 1, 1);
++        const dim3 blocks_num((hidden->ne[0] + block_dims.x - 1) / block_dims.x,
++                              hidden->ne[1], 1);
++        const ggml_cuda_kernel_launch_params launch_params = {
++            blocks_num, block_dims, 0, ctx.stream() };
++        if (gate->type == GGML_TYPE_BF16) {
++            ggml_cuda_kernel_launch(gated_residual_bf16<nv_bfloat16>, launch_params,
++                (const nv_bfloat16 *) hidden->data, (const nv_bfloat16 *) branch->data,
++                (const nv_bfloat16 *) gate->data, (nv_bfloat16 *) dst->data,
++                (int) hidden->ne[0], hidden->nb[1] / sizeof(nv_bfloat16),
++                branch->nb[1] / sizeof(nv_bfloat16),
++                gate->ne[1] == 1 ? 0 : gate->nb[1] / sizeof(nv_bfloat16));
++        } else {
++            ggml_cuda_kernel_launch(gated_residual_bf16<float>, launch_params,
++                (const nv_bfloat16 *) hidden->data, (const nv_bfloat16 *) branch->data,
++                (const float *) gate->data, (nv_bfloat16 *) dst->data,
++                (int) hidden->ne[0], hidden->nb[1] / sizeof(nv_bfloat16),
++                branch->nb[1] / sizeof(nv_bfloat16),
++                gate->ne[1] == 1 ? 0 : gate->nb[1] / sizeof(float));
++        }
++        return;
++    }
+     ggml_cuda_op_bin_bcast<bin_bcast_cuda<op_add>>(dst->src[0], dst->src[1], dst, dst->src[0]->data, dst->src[1]->data, dst->data, ctx.stream());
+ }
+ 
+@@ -512,6 +562,11 @@
+         launch_bin_bcast_pack<op, half, float, float>(src0, src1, dst,
+             (const half *) src0->data, (const float *) src1->data, (float *) dst->data,
+             stream, std::make_index_sequence<n_fuse>{});
++    } else if (src0->type == GGML_TYPE_BF16 && src1->type == GGML_TYPE_BF16 &&
++               dst->type == GGML_TYPE_BF16) {
++        launch_bin_bcast_pack<op, nv_bfloat16, nv_bfloat16, nv_bfloat16>(src0, src1, dst,
++            (const nv_bfloat16 *) src0->data, (const nv_bfloat16 *) src1->data,
++            (nv_bfloat16 *) dst->data, stream, std::make_index_sequence<n_fuse>{});
+     } else {
+         fprintf(stderr,
+                 "%s: unsupported types for fusion: dst: %s, src0: %s, src1: %s\n",
+--- a/ggml/src/ggml-cuda/conv2d.cu	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/src/ggml-cuda/conv2d.cu	2026-07-14 22:46:03.072176000 +0800
+@@ -1,6 +1,18 @@
+ #include "conv2d.cuh"
+ #include "convert.cuh"
+ 
++#ifdef GGML_CUDA_CUDNN
++#include <cudnn.h>
++
++#define CUDNN_CHECK(call) do {                                                   \
++    const cudnnStatus_t status = (call);                                         \
++    if (status != CUDNN_STATUS_SUCCESS) {                                        \
++        fprintf(stderr, "cuDNN error: %s\n", cudnnGetErrorString(status));      \
++        GGML_ABORT("cuDNN convolution failed");                                 \
++    }                                                                            \
++} while (0)
++#endif
++
+ struct conv_params {
+     const int64_t IW, IH;
+     const int64_t OW, OH;
+@@ -127,7 +139,8 @@
+     float *             Y_D    = (float *) dst->data;
+ 
+     GGML_ASSERT(ggml_is_contiguous(kernel));
+-    GGML_ASSERT(kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32);
++    GGML_ASSERT(kernel->type == GGML_TYPE_F16 || kernel->type == GGML_TYPE_F32 ||
++                kernel->type == GGML_TYPE_BF16);
+ 
+     // same number of input channels
+     GGML_ASSERT(input->ne[2] == kernel->ne[2]);
+@@ -158,8 +171,58 @@
+     const int64_t total  = B * OC * OH * OW;
+     conv_params   params = { IW, IH, OW, OH, KW, KH, ST_X, ST_Y, PD_X, PD_Y, DL_X, DL_Y, IC, OC, B, total };
+ 
++#ifdef GGML_CUDA_CUDNN
++    if (kernel->type == GGML_TYPE_BF16 && input->type == GGML_TYPE_BF16 &&
++        dst->type == GGML_TYPE_BF16) {
++        static cudnnHandle_t handles[GGML_CUDA_MAX_DEVICES] = {};
++        cudnnHandle_t & handle = handles[ctx.device];
++        if (!handle) CUDNN_CHECK(cudnnCreate(&handle));
++        CUDNN_CHECK(cudnnSetStream(handle, st));
++
++        cudnnTensorDescriptor_t input_desc, output_desc;
++        cudnnFilterDescriptor_t filter_desc;
++        cudnnConvolutionDescriptor_t conv_desc;
++        CUDNN_CHECK(cudnnCreateTensorDescriptor(&input_desc));
++        CUDNN_CHECK(cudnnCreateTensorDescriptor(&output_desc));
++        CUDNN_CHECK(cudnnCreateFilterDescriptor(&filter_desc));
++        CUDNN_CHECK(cudnnCreateConvolutionDescriptor(&conv_desc));
++        CUDNN_CHECK(cudnnSetTensor4dDescriptor(
++            input_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_BFLOAT16, B, IC, IH, IW));
++        CUDNN_CHECK(cudnnSetTensor4dDescriptor(
++            output_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_BFLOAT16, B, OC, OH, OW));
++        CUDNN_CHECK(cudnnSetFilter4dDescriptor(
++            filter_desc, CUDNN_DATA_BFLOAT16, CUDNN_TENSOR_NCHW, OC, IC, KH, KW));
++        CUDNN_CHECK(cudnnSetConvolution2dDescriptor(
++            conv_desc, PD_Y, PD_X, ST_Y, ST_X, DL_Y, DL_X,
++            CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
++        CUDNN_CHECK(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
++
++        const cudnnConvolutionFwdAlgo_t algo =
++            CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
++        size_t workspace_bytes = 0;
++        CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
++            handle, input_desc, filter_desc, conv_desc, output_desc, algo,
++            &workspace_bytes));
++        ggml_cuda_pool_alloc<uint8_t> workspace(ctx.pool());
++        if (workspace_bytes != 0) workspace.alloc(workspace_bytes);
++        const float alpha = 1.0f;
++        const float beta = 0.0f;
++        CUDNN_CHECK(cudnnConvolutionForward(
++            handle, &alpha, input_desc, input->data, filter_desc, kernel->data,
++            conv_desc, algo, workspace.get(), workspace_bytes, &beta,
++            output_desc, dst->data));
++        CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_desc));
++        CUDNN_CHECK(cudnnDestroyFilterDescriptor(filter_desc));
++        CUDNN_CHECK(cudnnDestroyTensorDescriptor(output_desc));
++        CUDNN_CHECK(cudnnDestroyTensorDescriptor(input_desc));
++        return;
++    }
++#endif
++
+     if (kernel->type == GGML_TYPE_F16) {
+         conv2d_cuda_f16(X_D, (half *) K_D, Y_D, params, st);
++    } else if (kernel->type == GGML_TYPE_BF16) {
++        GGML_ABORT("BF16 direct convolution requires GGML_CUDA_CUDNN");
+     } else {
+         conv2d_cuda_f32(X_D, K_D, Y_D, params, st);
+     }
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu	2026-07-14 16:05:29.041041786 +0800
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu	2026-07-14 10:46:23.252812000 +0800
+@@ -2209,7 +2209,7 @@
+     cudaStream_t main_stream = ctx.stream();
+     CUBLAS_CHECK(cublasSetStream(ctx.cublas_handle(), main_stream));
+ 
+-    float * dst_ddf = (float *) dst->data;
++    float * dst_ddf = dst->type == GGML_TYPE_F32 ? (float *) dst->data : nullptr;
+     const size_t ts_src1 = ggml_type_size(src1->type);
+     GGML_ASSERT(nb10 == ts_src1);
+     int64_t s11 = nb11 / ts_src1;
+@@ -2275,7 +2275,22 @@
+                                                                                   || cc == GGML_CUDA_CC_VOLTA
+                                                                                   || force_compute_type.fp32);
+ 
+-    if (dst->op_params[0] == GGML_PREC_DEFAULT && !need_compute_32f) {
++    if constexpr (src0_type == GGML_TYPE_BF16) {
++        if (dst->type == GGML_TYPE_BF16 && dst->op_params[0] == GGML_PREC_DEFAULT) {
++            dst_t = (char *) dst->data;
++        } else if (dst->op_params[0] == GGML_PREC_DEFAULT && !need_compute_32f) {
++            dst_t = (char *) dst_temp.alloc(ne_dst);
++            nbd2 /= sizeof(float) / sizeof(cuda_t);
++            nbd3 /= sizeof(float) / sizeof(cuda_t);
++        } else {
++            GGML_ASSERT(dst->type == GGML_TYPE_F32);
++            dst_t = (char *) dst_ddf;
++            cu_compute_type = batched_mul_mat_traits<GGML_TYPE_F32>::compute_type;
++            cu_data_type = batched_mul_mat_traits<GGML_TYPE_F32>::data_type;
++            alpha = batched_mul_mat_traits<GGML_TYPE_F32>::get_alpha();
++            beta = batched_mul_mat_traits<GGML_TYPE_F32>::get_beta();
++        }
++    } else if (dst->op_params[0] == GGML_PREC_DEFAULT && !need_compute_32f) {
+         if constexpr (src0_type == GGML_TYPE_F32) {
+             dst_t = (char *) dst_ddf;  // Direct F32 output
+         } else {
+@@ -2356,7 +2371,8 @@
+     }
+ 
+     // Convert output back to F32 if needed
+-    if (dst->op_params[0] == GGML_PREC_DEFAULT && cu_data_type != CUDA_R_32F) {
++    if (dst->type == GGML_TYPE_F32 && dst->op_params[0] == GGML_PREC_DEFAULT &&
++        cu_data_type != CUDA_R_32F) {
+         const to_fp32_cuda_t to_fp32_cuda = ggml_get_to_fp32_cuda(traits::ggml_type_val);
+         to_fp32_cuda(dst_temp.get(), dst_ddf, ne_dst, main_stream);
+     }
+@@ -2605,7 +2621,10 @@
+         return;
+     }
+ 
+-    if (!split && use_mul_mat_vec_f) {
++    if (!split && src0->type == GGML_TYPE_BF16 && src1->type == GGML_TYPE_BF16 &&
++        dst->type == GGML_TYPE_BF16) {
++        ggml_cuda_mul_mat_batched_cublas(ctx, src0, src1, dst);
++    } else if (!split && use_mul_mat_vec_f) {
+         // the custom F16 vector kernel can be used over batched cuBLAS GEMM
+         // but this is only faster for GPUs without tensor cores or with a thin src0 matrix (particularly KQV in attention)
+         ggml_cuda_mul_mat_vec_f(ctx, src0, src1, nullptr, dst);
+@@ -5514,9 +5533,9 @@
+         case GGML_OP_SUB:
+         case GGML_OP_MUL:
+         case GGML_OP_DIV:
+-            return (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16) &&
+-                   (op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16) &&
+-                   (op->type         == GGML_TYPE_F32 || op->type         == GGML_TYPE_F16);
++            return (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16 || op->src[0]->type == GGML_TYPE_BF16) &&
++                   (op->src[1]->type == GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F16 || op->src[1]->type == GGML_TYPE_BF16) &&
++                   (op->type         == GGML_TYPE_F32 || op->type         == GGML_TYPE_F16 || op->type         == GGML_TYPE_BF16);
+         case GGML_OP_SSM_SCAN: {
+             if (op->src[3]->ne[0] == 1) {
+                 // Mamba2
+--- a/ggml/src/ggml-cuda/im2col.cu	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/src/ggml-cuda/im2col.cu	2026-07-14 12:06:39.532453000 +0800
+@@ -67,6 +67,14 @@
+     im2col_cuda<half>(x, dst, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
+ }
+ 
++static void im2col_cuda_bf16(const float * x, nv_bfloat16 * dst,
++    int64_t IW, int64_t IH, int64_t OW, int64_t OH, int64_t KW, int64_t KH, int64_t IC,
++    int64_t N, int64_t IC_IH_IW, int64_t IH_IW,
++    int s0,int s1,int p0,int p1,int d0,int d1, cudaStream_t stream) {
++
++    im2col_cuda<nv_bfloat16>(x, dst, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
++}
++
+ static void im2col_cuda_f32(const float * x, float * dst,
+     int64_t IW, int64_t IH, int64_t OW, int64_t OH, int64_t KW, int64_t KH, int64_t IC,
+     int64_t N, int64_t IC_IH_IW, int64_t IH_IW,
+@@ -83,7 +91,7 @@
+     cudaStream_t stream = ctx.stream();
+ 
+     GGML_ASSERT(src1->type == GGML_TYPE_F32);
+-    GGML_ASSERT( dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_F32);
++    GGML_ASSERT( dst->type == GGML_TYPE_F16 || dst->type == GGML_TYPE_BF16 || dst->type == GGML_TYPE_F32);
+ 
+     const int32_t s0 = ((const int32_t*)(dst->op_params))[0];
+     const int32_t s1 = ((const int32_t*)(dst->op_params))[1];
+@@ -110,6 +118,8 @@
+ 
+     if(dst->type == GGML_TYPE_F16) {
+         im2col_cuda_f16(src1_d, (half *) dst_d, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
++    } else if (dst->type == GGML_TYPE_BF16) {
++        im2col_cuda_bf16(src1_d, (nv_bfloat16 *) dst_d, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
+     } else {
+         im2col_cuda_f32(src1_d, (float *) dst_d, IW, IH, OW, OH, KW, KH, IC, N, IC_IH_IW, IH_IW, s0, s1, p0, p1, d0, d1, stream);
+     }
+--- a/ggml/src/ggml-cuda/norm.cu	2026-07-14 16:05:29.033041774 +0800
++++ b/ggml/src/ggml-cuda/norm.cu	2026-07-14 16:24:20.533670000 +0800
+@@ -72,6 +72,70 @@
+     }
+ }
+ 
++template <int block_size, bool affine_bf16>
++static __global__ void norm_bf16_fused(
++        const nv_bfloat16 * x, const void * scale_ptr, const void * shift_ptr,
++        nv_bfloat16 * dst, const int ncols, const int64_t x_stride_row,
++        const int64_t scale_stride_row, const int64_t shift_stride_row,
++        const float eps) {
++    const int row = blockIdx.x;
++    const int tid = threadIdx.x;
++    x += row * x_stride_row;
++    dst += row * ncols;
++    float sum = 0.0f;
++    for (int col = tid; col < ncols; col += block_size) {
++        sum += __bfloat162float(x[col]);
++    }
++    extern __shared__ float s_sum[];
++    sum = block_reduce<block_reduce_method::SUM, block_size>(sum, s_sum);
++    const float mean = sum / ncols;
++    float var_sum = 0.0f;
++    for (int col = tid; col < ncols; col += block_size) {
++        const float centered = __bfloat162float(x[col]) - mean;
++        var_sum += centered * centered;
++    }
++    var_sum = block_reduce<block_reduce_method::SUM, block_size>(var_sum, s_sum);
++    const float var = var_sum / ncols;
++    const float inv_std = rsqrtf(var + eps);
++    if constexpr (affine_bf16) {
++        const nv_bfloat16 * scale = (const nv_bfloat16 *) scale_ptr + row * scale_stride_row;
++        const nv_bfloat16 * shift = (const nv_bfloat16 *) shift_ptr + row * shift_stride_row;
++        for (int col = tid; col < ncols; col += block_size) {
++            const float normalized = (__bfloat162float(x[col]) - mean) * inv_std;
++            dst[col] = __float2bfloat16(normalized * __bfloat162float(scale[col]) +
++                                        __bfloat162float(shift[col]));
++        }
++    } else {
++        const float * scale = (const float *) scale_ptr + row * scale_stride_row;
++        const float * shift = (const float *) shift_ptr + row * shift_stride_row;
++        for (int col = tid; col < ncols; col += block_size) {
++            const float normalized = (__bfloat162float(x[col]) - mean) * inv_std;
++            dst[col] = __float2bfloat16(normalized * (1.0f + scale[col]) + shift[col]);
++        }
++    }
++}
++
++template <int block_size>
++static __global__ void rms_norm_bf16_f32(
++        const nv_bfloat16 * x, const nv_bfloat16 * weight, float * dst,
++        const int ncols, const int64_t x_stride_row, const float eps) {
++    const int row = blockIdx.x;
++    const int tid = threadIdx.x;
++    x += row * x_stride_row;
++    dst += row * ncols;
++    float sum = 0.0f;
++    for (int col = tid; col < ncols; col += block_size) {
++        const float xi = __bfloat162float(x[col]);
++        sum += xi * xi;
++    }
++    extern __shared__ float s_sum[];
++    sum = block_reduce<block_reduce_method::SUM, block_size>(sum, s_sum);
++    const float inv_rms = rsqrtf(sum / ncols + eps);
++    for (int col = tid; col < ncols; col += block_size) {
++        dst[col] = __bfloat162float(x[col]) * inv_rms * __bfloat162float(weight[col]);
++    }
++}
++
+ template <int block_size>
+ static __global__ void group_norm_f32(const float * x, float * dst, const int group_size, const int ne_elements, const float eps) {
+     // blockIdx.x: num_groups idx
+@@ -468,6 +532,40 @@
+ 
+ void ggml_cuda_op_norm(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     const ggml_tensor * src0 = dst->src[0];
++    if (dst->src[1] && src0->type == GGML_TYPE_BF16) {
++        const ggml_tensor * scale = dst->src[1];
++        const ggml_tensor * shift = dst->src[2];
++        float eps;
++        memcpy(&eps, dst->op_params, sizeof(float));
++        const int64_t nrows = ggml_nrows(src0);
++        const dim3 blocks_num(nrows, 1, 1);
++        const dim3 block_dims(src0->ne[0] < 1024 ? 256 : 1024, 1, 1);
++        const ggml_cuda_kernel_launch_params launch_params = {
++            blocks_num, block_dims, block_dims.x > WARP_SIZE ? 32 * sizeof(float2) : 0,
++            ctx.stream() };
++        const int64_t x_stride = src0->nb[1] / sizeof(nv_bfloat16);
++        if (scale->type == GGML_TYPE_BF16) {
++            const int64_t ss = scale->ne[1] == 1 ? 0 : scale->nb[1] / sizeof(nv_bfloat16);
++            const int64_t zs = shift->ne[1] == 1 ? 0 : shift->nb[1] / sizeof(nv_bfloat16);
++            if (block_dims.x == 256) ggml_cuda_kernel_launch(norm_bf16_fused<256, true>, launch_params,
++                (const nv_bfloat16 *) src0->data, scale->data, shift->data,
++                (nv_bfloat16 *) dst->data, (int) src0->ne[0], x_stride, ss, zs, eps);
++            else ggml_cuda_kernel_launch(norm_bf16_fused<1024, true>, launch_params,
++                (const nv_bfloat16 *) src0->data, scale->data, shift->data,
++                (nv_bfloat16 *) dst->data, (int) src0->ne[0], x_stride, ss, zs, eps);
++        } else {
++            GGML_ASSERT(scale->type == GGML_TYPE_F32 && shift->type == GGML_TYPE_F32);
++            const int64_t ss = scale->ne[1] == 1 ? 0 : scale->nb[1] / sizeof(float);
++            const int64_t zs = shift->ne[1] == 1 ? 0 : shift->nb[1] / sizeof(float);
++            if (block_dims.x == 256) ggml_cuda_kernel_launch(norm_bf16_fused<256, false>, launch_params,
++                (const nv_bfloat16 *) src0->data, scale->data, shift->data,
++                (nv_bfloat16 *) dst->data, (int) src0->ne[0], x_stride, ss, zs, eps);
++            else ggml_cuda_kernel_launch(norm_bf16_fused<1024, false>, launch_params,
++                (const nv_bfloat16 *) src0->data, scale->data, shift->data,
++                (nv_bfloat16 *) dst->data, (int) src0->ne[0], x_stride, ss, zs, eps);
++        }
++        return;
++    }
+     const float * src0_d = (const float *) src0->data;
+     float * dst_d = (float *) dst->data;
+     cudaStream_t stream = ctx.stream();
+@@ -554,6 +652,24 @@
+ 
+ void ggml_cuda_op_rms_norm(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     const ggml_tensor * src0 = dst->src[0];
++    if (dst->src[1] && src0->type == GGML_TYPE_BF16) {
++        const ggml_tensor * weight = dst->src[1];
++        GGML_ASSERT(weight->type == GGML_TYPE_BF16 && dst->type == GGML_TYPE_F32);
++        float eps;
++        memcpy(&eps, dst->op_params, sizeof(float));
++        const dim3 blocks_num(ggml_nrows(src0), 1, 1);
++        const dim3 block_dims(src0->ne[0] < 1024 ? 256 : 1024, 1, 1);
++        const ggml_cuda_kernel_launch_params launch_params = {
++            blocks_num, block_dims, block_dims.x > WARP_SIZE ? 32 * sizeof(float) : 0,
++            ctx.stream() };
++        if (block_dims.x == 256) ggml_cuda_kernel_launch(rms_norm_bf16_f32<256>, launch_params,
++            (const nv_bfloat16 *) src0->data, (const nv_bfloat16 *) weight->data,
++            (float *) dst->data, (int) src0->ne[0], src0->nb[1] / sizeof(nv_bfloat16), eps);
++        else ggml_cuda_kernel_launch(rms_norm_bf16_f32<1024>, launch_params,
++            (const nv_bfloat16 *) src0->data, (const nv_bfloat16 *) weight->data,
++            (float *) dst->data, (int) src0->ne[0], src0->nb[1] / sizeof(nv_bfloat16), eps);
++        return;
++    }
+     const float * src0_d = (const float *) src0->data;
+     float * dst_d = (float *) dst->data;
+     cudaStream_t stream = ctx.stream();
+--- a/ggml/src/ggml-cuda/unary.cu	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/src/ggml-cuda/unary.cu	2026-07-14 15:11:46.122850000 +0800
+@@ -134,6 +134,15 @@
+     ggml_cuda_kernel_launch(unary_op_kernel<op, T>, launch_params, x, dst, k);
+ }
+ 
++static __global__ void bias_gelu_bf16_kernel(
++        const nv_bfloat16 * input, const nv_bfloat16 * bias,
++        nv_bfloat16 * dst, const int width, const int n) {
++    const int i = blockDim.x*blockIdx.x + threadIdx.x;
++    if (i >= n) return;
++    const float value = __bfloat162float(input[i]) + __bfloat162float(bias[i % width]);
++    dst[i] = __float2bfloat16(op_gelu(value));
++}
++
+ template <float (*op)(float)>
+ void ggml_cuda_op_unary(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     const ggml_tensor * src0 = dst->src[0];
+@@ -143,12 +152,17 @@
+ 
+     GGML_ASSERT(ggml_is_contiguous(src0));
+ 
+-    GGML_ASSERT(src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16);
+-    GGML_ASSERT( dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16);
++    GGML_ASSERT(src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16 ||
++                src0->type == GGML_TYPE_BF16);
++    GGML_ASSERT( dst->type == GGML_TYPE_F32 ||  dst->type == GGML_TYPE_F16 ||
++                 dst->type == GGML_TYPE_BF16);
+     GGML_ASSERT(src0->type == dst->type);
+ 
+     if (src0->type == GGML_TYPE_F16) {
+         unary_cuda<op>((const half *)src0_d, (half *)dst_d, ggml_nelements(src0), stream);
++    } else if (src0->type == GGML_TYPE_BF16) {
++        unary_cuda<op>((const nv_bfloat16 *) src0_d, (nv_bfloat16 *) dst_d,
++                       ggml_nelements(src0), stream);
+     } else {
+         unary_cuda<op>((const float *)src0_d, (float *)dst_d, ggml_nelements(src0), stream);
+     }
+@@ -171,6 +185,20 @@
+ }
+ 
+ void ggml_cuda_op_gelu(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
++    if (dst->src[1]) {
++        const ggml_tensor * input = dst->src[0];
++        const ggml_tensor * bias = dst->src[1];
++        GGML_ASSERT(input->type == GGML_TYPE_BF16 && bias->type == GGML_TYPE_BF16 &&
++                    dst->type == GGML_TYPE_BF16 && ggml_is_contiguous(input));
++        const int n = ggml_nelements(input);
++        const int num_blocks = (n + CUDA_NEG_BLOCK_SIZE - 1) / CUDA_NEG_BLOCK_SIZE;
++        const ggml_cuda_kernel_launch_params launch_params = {
++            (dim3) num_blocks, CUDA_NEG_BLOCK_SIZE, 0, ctx.stream() };
++        ggml_cuda_kernel_launch(bias_gelu_bf16_kernel, launch_params,
++            (const nv_bfloat16 *) input->data, (const nv_bfloat16 *) bias->data,
++            (nv_bfloat16 *) dst->data, (int) bias->ne[0], n);
++        return;
++    }
+     ggml_cuda_op_unary<op_gelu>(ctx, dst);
+ }
+ 
+--- a/ggml/src/ggml.c	2026-07-03 21:36:55.000000000 +0800
++++ b/ggml/src/ggml.c	2026-07-14 19:14:53.438939000 +0800
+@@ -3236,15 +3236,17 @@
+            (t1->ne[3]%t0->ne[3] == 0);
+ }
+ 
+-struct ggml_tensor * ggml_mul_mat(
++struct ggml_tensor * ggml_mul_mat_out_type(
+         struct ggml_context * ctx,
+         struct ggml_tensor  * a,
+-        struct ggml_tensor  * b) {
++        struct ggml_tensor  * b,
++        enum   ggml_type      type) {
+     GGML_ASSERT(ggml_can_mul_mat(a, b));
+     GGML_ASSERT(!ggml_is_transposed(a));
++    GGML_ASSERT(type == GGML_TYPE_F32 || type == GGML_TYPE_BF16);
+ 
+     const int64_t ne[4] = { a->ne[1], b->ne[1], b->ne[2], b->ne[3] };
+-    struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, ne);
++    struct ggml_tensor * result = ggml_new_tensor(ctx, type, 4, ne);
+ 
+     result->op     = GGML_OP_MUL_MAT;
+     result->src[0] = a;
+@@ -3253,6 +3255,99 @@
+     return result;
+ }
+ 
++struct ggml_tensor * ggml_mul_mat(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * a,
++        struct ggml_tensor  * b) {
++    return ggml_mul_mat_out_type(ctx, a, b, GGML_TYPE_F32);
++}
++
++struct ggml_tensor * ggml_gated_residual_bf16(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * hidden,
++        struct ggml_tensor  * branch,
++        struct ggml_tensor  * gate) {
++    GGML_ASSERT(hidden->type == GGML_TYPE_BF16);
++    GGML_ASSERT(branch->type == GGML_TYPE_BF16);
++    GGML_ASSERT(gate->type == GGML_TYPE_F32 || gate->type == GGML_TYPE_BF16);
++    GGML_ASSERT(ggml_are_same_shape(hidden, branch));
++    GGML_ASSERT(ggml_are_same_shape(hidden, gate) ||
++                (hidden->ne[0] == gate->ne[0] && gate->ne[1] == 1));
++
++    struct ggml_tensor * result = ggml_dup_tensor(ctx, hidden);
++    result->op = GGML_OP_ADD;
++    result->src[0] = hidden;
++    result->src[1] = branch;
++    result->src[2] = gate;
++    return result;
++}
++
++struct ggml_tensor * ggml_bias_gelu_bf16(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * input,
++        struct ggml_tensor  * bias) {
++    GGML_ASSERT(input->type == GGML_TYPE_BF16);
++    GGML_ASSERT(bias->type == GGML_TYPE_BF16);
++    GGML_ASSERT(bias->ne[0] == input->ne[0]);
++
++    struct ggml_tensor * result = ggml_dup_tensor(ctx, input);
++    result->op = GGML_OP_UNARY;
++    result->src[0] = input;
++    result->src[1] = bias;
++    ggml_set_op_params_i32(result, 0, (int32_t) GGML_UNARY_OP_GELU);
++    return result;
++}
++
++struct ggml_tensor * ggml_norm_modulation_bf16(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * input,
++        struct ggml_tensor  * scale,
++        struct ggml_tensor  * shift,
++        float                 eps) {
++    GGML_ASSERT(input->type == GGML_TYPE_BF16);
++    GGML_ASSERT(scale->type == shift->type);
++    GGML_ASSERT(scale->type == GGML_TYPE_F32 || scale->type == GGML_TYPE_BF16);
++    struct ggml_tensor * result = ggml_dup_tensor(ctx, input);
++    ggml_set_op_params(result, &eps, sizeof(eps));
++    result->op = GGML_OP_NORM;
++    result->src[0] = input;
++    result->src[1] = scale;
++    result->src[2] = shift;
++    return result;
++}
++
++struct ggml_tensor * ggml_layer_norm_bf16(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * input,
++        struct ggml_tensor  * weight,
++        struct ggml_tensor  * bias,
++        float                 eps) {
++    GGML_ASSERT(input->type == GGML_TYPE_BF16);
++    GGML_ASSERT(weight->type == GGML_TYPE_BF16 && bias->type == GGML_TYPE_BF16);
++    struct ggml_tensor * result = ggml_dup_tensor(ctx, input);
++    ggml_set_op_params(result, &eps, sizeof(eps));
++    result->op = GGML_OP_NORM;
++    result->src[0] = input;
++    result->src[1] = weight;
++    result->src[2] = bias;
++    return result;
++}
++
++struct ggml_tensor * ggml_rms_norm_bf16_f32(
++        struct ggml_context * ctx,
++        struct ggml_tensor  * input,
++        struct ggml_tensor  * weight,
++        float                 eps) {
++    GGML_ASSERT(input->type == GGML_TYPE_BF16 && weight->type == GGML_TYPE_BF16);
++    struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32,
++                                                   ggml_n_dims(input), input->ne);
++    ggml_set_op_params(result, &eps, sizeof(eps));
++    result->op = GGML_OP_RMS_NORM;
++    result->src[0] = input;
++    result->src[1] = weight;
++    return result;
++}
++
+ void ggml_mul_mat_set_prec(
+         struct ggml_tensor * a,
+         enum ggml_prec       prec) {
+@@ -4629,9 +4724,10 @@
+     struct ggml_tensor * im2col = ggml_im2col(ctx, a, b, s0, s1, p0, p1, d0, d1, true, a->type); // [N, OH, OW, IC * KH * KW]
+ 
+     struct ggml_tensor * result =
+-        ggml_mul_mat(ctx,
++        ggml_mul_mat_out_type(ctx,
+                 ggml_reshape_2d(ctx, im2col, im2col->ne[0],  im2col->ne[3] * im2col->ne[2] * im2col->ne[1]), // [N, OH, OW, IC * KH * KW] => [N*OH*OW, IC * KH * KW]
+-                ggml_reshape_2d(ctx, a, (a->ne[0] * a->ne[1] * a->ne[2]),  a->ne[3]));                       // [OC，IC, KH, KW] => [OC, IC * KH * KW]
++                ggml_reshape_2d(ctx, a, (a->ne[0] * a->ne[1] * a->ne[2]),  a->ne[3]),                        // [OC，IC, KH, KW] => [OC, IC * KH * KW]
++                a->type == GGML_TYPE_BF16 ? GGML_TYPE_BF16 : GGML_TYPE_F32);
+ 
+     result = ggml_reshape_4d(ctx, result, im2col->ne[1], im2col->ne[2], im2col->ne[3], a->ne[3]); // [OC, N, OH, OW]
+     result = ggml_cont(ctx, ggml_permute(ctx, result, 0, 1, 3, 2)); // [N, OC, OH, OW]
+@@ -7179,6 +7275,11 @@
+     return ggml_new_graph_custom(ctx, GGML_DEFAULT_GRAPH_SIZE, false);
+ }
+ 
++void ggml_graph_assign_uid(struct ggml_cgraph * cgraph) {
++    GGML_ASSERT(cgraph != NULL);
++    if (cgraph->uid == 0) cgraph->uid = ggml_graph_next_uid();
++}
++
+ struct ggml_cgraph ggml_graph_view(struct ggml_cgraph * cgraph0, int i0, int i1) {
+     struct ggml_cgraph cgraph = {
+         /*.size             =*/ 0,

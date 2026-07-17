@@ -1,0 +1,27 @@
+name: cpu
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-install:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Source-tree audit
+        run: python3 scripts/release/check_source_tree.py .
+      - name: Configure
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DWAM_CUDA=OFF -DWAM_BUILD_APPS=ON
+          -DWAM_BUILD_SERVER=OFF -DWAM_BUILD_GIGA_WORLD_POLICY=ON
+          -DWAM_PROTOC_EXECUTABLE=$(command -v protoc)
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Install smoke
+        run: |
+          cmake --install build --prefix build/install
+          build/install/bin/run_inference_openloop_wam-cpp.sh --help
