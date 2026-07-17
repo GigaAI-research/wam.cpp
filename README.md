@@ -40,7 +40,7 @@ inference, arbitrary camera counts, model hot-loading, or concurrent prediction
 ### 2.2 Supported Hardware And Performance
 
 | GPU | Precision | Latency | Device-memory |
-| --- | --- | ---: | ---: | ---: |
+| --- | --- | ---: | ---: |
 | NVIDIA RTX 4090 | BF16 | 85 ms | 12.15 GB  |
 | NVIDIA A800 | BF16 | 108 ms | 13.07 GB |
 
