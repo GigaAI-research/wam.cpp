@@ -34,8 +34,6 @@ wam.cpp for GWP-0.5 supports three language residency policies:
 - `resident`: keeps T5 loaded and accepts arbitrary request tokens or
   embeddings.
 
-The v0.1 release does not support world/video generation, batch
-inference, arbitrary camera counts, model hot-loading, or concurrent prediction
 
 ### 2.2 Supported Hardware And Performance
 
@@ -157,10 +155,6 @@ test -f "${WAM_PREFIX}/share/wam/proto/wam.desc"
 "${WAM_PREFIX}/bin/run_inference_openloop_wam-cpp.sh" --help
 ```
 
-`WAM_PREFIX` is only a shell convenience variable. The launcher can infer the
-prefix from its installed `bin/` location; `WAM_INSTALL_PREFIX` is only needed
-when invoking the thin script copied into another repository.
-
 ### 4.4 GWP-0.5 Open-Loop Inference
 
 #### 4.4.1 Prepare the GigaWorld-Policy Environment
@@ -187,9 +181,6 @@ python -m pip install -r \
   "${WAM_PREFIX}/share/wam/integrations/giga-world-policy/giga-world-policy.txt"
 ```
 
-The upstream environment supplies PyTorch, ZeroMQ, dataset readers, and
-`RobotInferenceServer`; wam.cpp does not vendor those implementations.
-
 #### 4.4.2 Prepare Dataset, Norm Stats, and T5 Embeddings
 
 Follow the upstream dataset contract. For a LeRobot v3.0 dataset:
@@ -215,10 +206,6 @@ prompt embedding from this prepared dataset. Use data and checkpoints whose
 licenses permit your intended use.
 
 #### 4.4.3 Download or Convert GGUF
-
-No pre-converted GGUF is distributed by the v0.1 source repository. Until an
-artifact release with a policy ID, SHA-256, and model license is published,
-conversion is required.
 
 From the wam.cpp source tree:
 
