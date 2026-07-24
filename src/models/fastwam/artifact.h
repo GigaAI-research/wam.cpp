@@ -8,16 +8,15 @@ namespace wam::internal {
 
 class GgufReader;
 
-namespace gwp05 {
+namespace fastwam {
 
 struct ArtifactContract;
 
-policy::PolicySpecDraft read_legacy_policy_spec(const GgufReader & reader);
 std::shared_ptr<ArtifactContract> load_artifact(
     std::shared_ptr<GgufReader> reader,
     const policy::PolicySpecDraft & policy_spec);
 void validate_artifact(const ArtifactContract & artifact,
                        const policy::PolicySpecDraft & policy_spec);
 
-} // namespace gwp05
+} // namespace fastwam
 } // namespace wam::internal

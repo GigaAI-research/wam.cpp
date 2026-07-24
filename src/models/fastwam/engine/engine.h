@@ -2,7 +2,7 @@
 
 #include <memory>
 
-namespace wam::internal::gwp05 {
+namespace wam::internal::fastwam {
 
 struct ArtifactContract;
 struct PreparedInputs;
@@ -19,4 +19,4 @@ CoreAction predict(Engine & engine, const PreparedInputs & inputs);
 void reset(Engine & engine);
 
 } // namespace engine
-} // namespace wam::internal::gwp05
+} // namespace wam::internal::fastwam

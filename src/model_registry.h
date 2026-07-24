@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 namespace wam::internal {
@@ -12,25 +13,22 @@ namespace wam::internal {
 class GgufReader;
 
 using ModelFactory = std::function<std::unique_ptr<ModelImpl>(
-    const ModelOptions &, ModelInfo, std::shared_ptr<GgufReader>)>;
-
-struct RegistryEntry {
-    Arch arch = Arch::unknown;
-    ModelFactory factory;
-};
+    const ModelOptions & options,
+    ModelInfo info,
+    std::optional<policy::PolicySpecDraft> policy_spec,
+    std::shared_ptr<GgufReader> reader)>;
 
 class ModelRegistry {
 public:
     void add(Arch arch, ModelFactory factory);
-    const RegistryEntry * find(Arch arch) const noexcept;
+    const ModelFactory * find(Arch arch) const noexcept;
 
 private:
     struct ArchHash {
-        std::size_t operator()(Arch value) const noexcept {
-            return static_cast<std::size_t>(value);
-        }
+        std::size_t operator()(Arch arch) const noexcept;
     };
-    std::unordered_map<Arch, RegistryEntry, ArchHash> entries_;
+
+    std::unordered_map<Arch, ModelFactory, ArchHash> factories_;
 };
 
 ModelRegistry & model_registry();

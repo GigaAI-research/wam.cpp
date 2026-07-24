@@ -1,11 +1,11 @@
 #pragma once
 
-#include "models/gwp05/artifact.h"
+#include "models/fastwam/artifact.h"
 #include "wam/types.h"
 
 #include <random>
 
-namespace wam::internal::gwp05 {
+namespace wam::internal::fastwam {
 
 struct PreparedInputs;
 
@@ -13,4 +13,4 @@ PreparedInputs prepare_inputs(const Inputs & inputs,
                               const ArtifactContract & artifact,
                               std::mt19937 & random);
 
-} // namespace wam::internal::gwp05
+} // namespace wam::internal::fastwam

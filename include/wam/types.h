@@ -5,7 +5,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <variant>
 #include <vector>
 
@@ -13,14 +12,14 @@ namespace wam {
 
 enum class ErrorCode : std::uint32_t {
     ok = 0,
-    invalid_argument = 1,
-    not_found = 2,
-    unsupported = 3,
-    incompatible_artifact = 4,
-    resource_exhausted = 5,
-    failed_precondition = 6,
-    inference_failed = 7,
-    internal = 8,
+    invalid_argument,
+    not_found,
+    unsupported,
+    incompatible_artifact,
+    resource_exhausted,
+    failed_precondition,
+    inference_failed,
+    internal,
 };
 
 struct ErrorDetail {
@@ -33,18 +32,16 @@ struct Status {
     std::string message;
     std::vector<ErrorDetail> details;
 
-    explicit operator bool() const noexcept { return code == ErrorCode::ok; }
-    static Status success() { return {}; }
+    explicit operator bool() const noexcept;
+    static Status success();
 };
 
 class Error final : public std::runtime_error {
 public:
     Error(ErrorCode code, std::string message,
-          std::vector<ErrorDetail> details = {})
-        : std::runtime_error(std::move(message)), code_(code), details_(std::move(details)) {}
-
-    ErrorCode code() const noexcept { return code_; }
-    const std::vector<ErrorDetail> & details() const noexcept { return details_; }
+          std::vector<ErrorDetail> details = {});
+    ErrorCode code() const noexcept;
+    const std::vector<ErrorDetail> & details() const noexcept;
 
 private:
     ErrorCode code_;
@@ -53,31 +50,21 @@ private:
 
 enum class DType : std::uint32_t {
     unknown = 0,
-    u8 = 1,
-    i32 = 2,
-    f32 = 3,
-    bf16 = 4,
+    u8,
+    i32,
+    f32,
+    bf16,
 };
 
 enum class ByteOrder : std::uint32_t {
     unspecified = 0,
-    little = 1,
-    big = 2,
-    not_applicable = 3,
+    little,
+    big,
+    not_applicable,
 };
 
-inline constexpr std::size_t dtype_size(DType dtype) noexcept {
-    switch (dtype) {
-        case DType::u8: return 1;
-        case DType::i32:
-        case DType::f32: return 4;
-        case DType::bf16: return 2;
-        case DType::unknown: return 0;
-    }
-    return 0;
-}
+std::size_t dtype_size(DType dtype) noexcept;
 
-// Payload memory is borrowed from the caller for the duration of predict().
 struct TensorView {
     const void * data = nullptr;
     std::size_t byte_size = 0;
@@ -86,10 +73,9 @@ struct TensorView {
     std::string layout;
     ByteOrder byte_order = ByteOrder::not_applicable;
 
-    bool empty() const noexcept { return data == nullptr || byte_size == 0; }
+    bool empty() const noexcept;
 };
 
-// Tensor owns its payload and is safe after predict() returns.
 struct Tensor {
     std::vector<std::uint8_t> data;
     DType dtype = DType::unknown;
@@ -97,12 +83,7 @@ struct Tensor {
     std::string layout;
     ByteOrder byte_order = ByteOrder::not_applicable;
 
-    bool empty() const noexcept { return data.empty(); }
-};
-
-struct NamedTensor {
-    std::string name;
-    Tensor tensor;
+    bool empty() const noexcept;
 };
 
 struct NamedTensorView {
@@ -110,14 +91,18 @@ struct NamedTensorView {
     TensorView tensor;
 };
 
-enum class ImageEncoding : std::uint32_t {
-    unknown = 0,
-    rgb_u8 = 1,
-    png = 2,
-    jpeg = 3,
+struct NamedTensor {
+    std::string name;
+    Tensor tensor;
 };
 
-// Encoded bytes or packed RGB bytes are borrowed during predict().
+enum class ImageEncoding : std::uint32_t {
+    unknown = 0,
+    rgb_u8,
+    png,
+    jpeg,
+};
+
 struct ImageView {
     std::string name;
     ImageEncoding encoding = ImageEncoding::unknown;
@@ -134,11 +119,11 @@ struct ArrayView {
     const T * data = nullptr;
     std::size_t size = 0;
 
-    ArrayView() = default;
-    ArrayView(const T * values, std::size_t count) : data(values), size(count) {}
-    explicit ArrayView(const std::vector<T> & values) : data(values.data()), size(values.size()) {}
+    ArrayView();
+    ArrayView(const T * values, std::size_t count);
+    explicit ArrayView(const std::vector<T> & values);
     ArrayView(std::vector<T> &&) = delete;
-    bool empty() const noexcept { return data == nullptr || size == 0; }
+    bool empty() const noexcept;
 };
 
 struct TokenInput {
@@ -157,27 +142,32 @@ struct Inputs {
     std::vector<ImageView> images;
     LanguageInput language;
     TensorView state;
-    TensorView noise;
+    TensorView action_noise;
     std::vector<NamedTensorView> history;
 };
 
 enum class Backend : std::uint32_t {
     unknown = 0,
-    automatic = 1,
-    cuda = 2,
-    cpu_metadata = 3,
+    automatic,
+    cuda,
+    cpu_metadata,
 };
 
-enum class Precision : std::uint32_t {
+enum class ComputePrecision : std::uint32_t {
     unknown = 0,
-    f32_reference = 1,
-    bf16_latency = 2,
+    automatic,
+    f32,
+    f16,
+    bf16,
+    fp8_e4m3,
+    fp8_e5m2,
+    int8,
 };
 
-enum class LanguageEncoderPolicy : std::uint32_t {
-    resident = 0,
-    fixed = 1,
-    external_embedding = 2,
+enum class LanguageRuntimeMode : std::uint32_t {
+    automatic = 0,
+    tokens,
+    external_embedding,
 };
 
 struct FixedPrompt {
@@ -188,15 +178,16 @@ struct FixedPrompt {
 struct ModelOptions {
     std::string artifact_path;
     Backend backend = Backend::automatic;
-    Precision precision = Precision::f32_reference;
+    ComputePrecision compute_precision = ComputePrecision::automatic;
     std::int32_t device_index = 0;
     std::size_t prompt_cache_capacity = 0;
-    LanguageEncoderPolicy language_encoder_policy = LanguageEncoderPolicy::resident;
+    LanguageRuntimeMode language_mode = LanguageRuntimeMode::automatic;
     std::optional<FixedPrompt> fixed_prompt;
 };
 
 struct SessionOptions {
     bool enable_prefix_cache = true;
+    std::uint64_t random_seed = 0;
 };
 
 struct PhaseTiming {
@@ -206,17 +197,15 @@ struct PhaseTiming {
 
 struct Stats {
     double preprocess_milliseconds = 0.0;
-    double vae_milliseconds = 0.0;
-    double text_encoder_milliseconds = 0.0;
-    double prompt_projection_milliseconds = 0.0;
-    double prefix_milliseconds = 0.0;
-    double denoise_milliseconds = 0.0;
+    double model_milliseconds = 0.0;
+    double model_vision_milliseconds = 0.0;
+    double model_text_milliseconds = 0.0;
+    double model_prefill_milliseconds = 0.0;
+    double model_decode_milliseconds = 0.0;
     double postprocess_milliseconds = 0.0;
     double total_milliseconds = 0.0;
-    std::vector<double> denoise_step_milliseconds;
-    std::vector<PhaseTiming> additional_timings;
-    bool prompt_cache_hit = false;
-    bool projected_prompt_cache_hit = false;
+
+    std::vector<PhaseTiming> model_timings;
     std::uint64_t peak_device_memory_bytes = 0;
 };
 
@@ -232,13 +221,13 @@ struct Capabilities {
     bool raw_images = false;
     bool token_input = false;
     bool precomputed_embedding = false;
-    bool explicit_noise = false;
+    bool explicit_action_noise = false;
     bool batch_inference = false;
     bool concurrent_sessions = false;
     bool arbitrary_token_input = false;
     bool fixed_token_input = false;
     std::vector<Backend> backends;
-    std::vector<Precision> precisions;
+    std::vector<ComputePrecision> compute_precisions;
 };
 
 struct RuntimeComponentInfo {
@@ -263,22 +252,15 @@ struct ModelInfo {
     std::string architecture;
     std::string artifact_path;
     std::string artifact_policy;
-    std::string artifact_sha256;
     std::uint64_t artifact_bytes = 0;
     Backend backend = Backend::automatic;
-    Precision precision = Precision::f32_reference;
-    LanguageEncoderPolicy language_encoder_policy = LanguageEncoderPolicy::resident;
-    bool text_encoder_resident = false;
+    ComputePrecision compute_precision = ComputePrecision::unknown;
+    LanguageRuntimeMode language_mode = LanguageRuntimeMode::automatic;
     std::uint64_t resident_device_bytes = 0;
     std::uint64_t peak_component_device_bytes = 0;
     Capabilities capabilities;
     std::vector<ArtifactComponentInfo> artifact_components;
     std::vector<RuntimeComponentInfo> runtime_components;
 };
-
-inline constexpr const char * kImageHigh = "camera_high";
-inline constexpr const char * kImageLeftWrist = "camera_left_wrist";
-inline constexpr const char * kImageRightWrist = "camera_right_wrist";
-inline constexpr const char * kGwp05ReferenceLatent = "gwp05.reference_latent";
 
 } // namespace wam

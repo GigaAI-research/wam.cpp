@@ -1,8 +1,8 @@
 #pragma once
 
-#include "models/gwp05/artifact.h"
+#include "models/fastwam/artifact.h"
 
-namespace wam::internal::gwp05 {
+namespace wam::internal::fastwam {
 
 struct SequenceGeometry;
 
@@ -10,4 +10,4 @@ void validate_policy_semantics(const policy::PolicySpecDraft & policy_spec);
 SequenceGeometry resolve_sequence_geometry(const ArtifactContract & artifact,
                                            const policy::PolicySpecDraft & policy_spec);
 
-} // namespace wam::internal::gwp05
+} // namespace wam::internal::fastwam

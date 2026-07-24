@@ -10,7 +10,7 @@ namespace wam::internal {
 class GgufReader;
 class ModelRegistry;
 
-namespace gwp05 {
+namespace fastwam {
 
 std::unique_ptr<ModelImpl> create_model(
     const ModelOptions & options,
@@ -18,8 +18,8 @@ std::unique_ptr<ModelImpl> create_model(
     std::optional<policy::PolicySpecDraft> policy_spec,
     std::shared_ptr<GgufReader> reader);
 
-} // namespace gwp05
+} // namespace fastwam
 
-void register_gwp05(ModelRegistry & registry);
+void register_fastwam(ModelRegistry & registry);
 
 } // namespace wam::internal
