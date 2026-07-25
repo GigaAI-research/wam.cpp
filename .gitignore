@@ -1,4 +1,72 @@
+# CMake and build outputs
+/build/
+/build-*/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+Makefile
+Testing/
+_deps/
+
+# Compiled outputs
+*.a
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Models, converted artifacts, and profiling output
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.npz
+*.npy
+*.nsys-rep
+*.sqlite
+*.qdrep
+*.prof
+*.trace
+*.dump
+
+# Runtime output
+*.log
+core
+core.*
+/action*.f32
+/report*.json
+
+# Internal replay payloads are local-only until redistribution is approved.
+/tests/data/gwp05/fixed/
+/tests/data/gwp05/independent/
+
+# Upstream simulator checkouts are managed by eval setup scripts.
 /eval/sim/RoboTwin/
 /eval/sim/LIBERO/
 /eval/sim/LIBERO-X/
 
+# Editors and OS metadata
+.DS_Store
+.idea/
+.vscode/
+*~
+*.swp
