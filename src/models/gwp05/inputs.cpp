@@ -3,12 +3,10 @@
 #include "models/common/input_validation.h"
 #include "models/gwp05/semantics.h"
 #include "policy/image_ops.h"
+#include "policy/language_ops.h"
 #include "policy/state_ops.h"
 
 #include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <string>
 
 namespace wam::internal::gwp05 {
@@ -85,87 +83,20 @@ void prepare_token_language(const TokenInput & input,
     prepared.attention_mask.assign(prepared.token_ids.size(), 1);
 }
 
-void validate_bf16_finite(const TensorView & tensor,
-                          const std::string & field) {
-    const std::size_t elements = checked_numel(tensor.shape, field);
-    const auto * bytes = static_cast<const std::uint8_t *>(tensor.data);
-    for (std::size_t index = 0; index < elements; ++index) {
-        std::uint16_t value = 0;
-        std::memcpy(&value, bytes + index * sizeof(value), sizeof(value));
-        if ((value & 0x7F80U) == 0x7F80U) {
-            invalid("BF16 tensor contains NaN or Inf", field,
-                    std::to_string(index));
-        }
-    }
-}
-
 void prepare_embedding_language(
     const EmbeddingInput & input, const ArtifactContract & artifact,
     const policy::LanguageSpec & language, PreparedInputs & prepared) {
-    const TensorView & embedding = input.embedding;
-    if (embedding.data == nullptr || embedding.shape.size() != 2 ||
-        embedding.shape[0] <= 0 ||
-        embedding.shape[1] !=
-            static_cast<std::int64_t>(artifact.geometry.t5_hidden) ||
-        embedding.shape[0] >
-            static_cast<std::int64_t>(language.max_tokens) ||
-        embedding.layout != "T,D" ||
-        embedding.byte_order != ByteOrder::little ||
-        (embedding.dtype != DType::f32 &&
-         embedding.dtype != DType::bf16)) {
-        invalid("prompt embedding contract is invalid", "language.embedding",
-                "expected little-endian F32/BF16 [T,D] with layout T,D");
-    }
-    const std::size_t elements =
-        checked_numel(embedding.shape, "language.embedding");
-    const std::size_t width = dtype_size(embedding.dtype);
-    if (width == 0 ||
-        elements > std::numeric_limits<std::size_t>::max() / width ||
-        embedding.byte_size != elements * width) {
-        invalid("prompt embedding byte size is invalid", "language.embedding",
-                "payload size mismatch");
-    }
-    if (embedding.dtype == DType::f32) {
-        const auto * bytes =
-            static_cast<const std::uint8_t *>(embedding.data);
-        for (std::size_t index = 0; index < elements; ++index) {
-            float value = 0.0F;
-            std::memcpy(&value, bytes + index * sizeof(value), sizeof(value));
-            if (!std::isfinite(value)) {
-                invalid("prompt embedding contains NaN or Inf",
-                        "language.embedding", std::to_string(index));
-            }
-        }
-    } else {
-        validate_bf16_finite(embedding, "language.embedding");
-    }
-
+    policy::PreparedEmbedding common = policy::prepare_embedding_input(
+        input, language, artifact.geometry.t5_hidden);
     const std::size_t tokens =
-        static_cast<std::size_t>(embedding.shape[0]);
-    if (input.attention_mask.empty()) {
-        if (language.attention_mask_required) {
-            invalid("embedding attention mask is required",
-                    "language.attention_mask", "missing");
-        }
-        prepared.embedding_attention_mask.assign(tokens, 1);
-    } else {
-        prepared.embedding_attention_mask = copy_i32_tensor(
-            input.attention_mask,
-            {static_cast<std::int64_t>(tokens)},
-            "language.attention_mask");
-    }
+        static_cast<std::size_t>(common.embedding.shape[0]);
+    prepared.embedding_attention_mask = std::move(common.attention_mask);
     const std::vector<std::int32_t> dummy_tokens(tokens, 0);
     (void) semantics::prepare_prompt(
         dummy_tokens, prepared.embedding_attention_mask, 1,
         language.padding_side);
 
-    prepared.embedding.dtype = embedding.dtype;
-    prepared.embedding.shape = embedding.shape;
-    prepared.embedding.layout = embedding.layout;
-    prepared.embedding.byte_order = embedding.byte_order;
-    prepared.embedding.data.resize(embedding.byte_size);
-    std::memcpy(prepared.embedding.data.data(), embedding.data,
-                embedding.byte_size);
+    prepared.embedding = std::move(common.embedding);
 }
 
 TokenInput fixed_prompt_view(const FixedPrompt & prompt) {

@@ -139,16 +139,24 @@ struct ImageSpec {
 };
 
 struct NormalizationSpec {
+    NormalizationSpec() = default;
+    NormalizationSpec(NormalizationKind normalization_kind,
+                      bool normalization_clip, float normalization_epsilon)
+        : kind(normalization_kind), clip(normalization_clip),
+          epsilon(normalization_epsilon) {}
+
     NormalizationKind kind = NormalizationKind::none;
     bool clip = false;
     float epsilon = 0.0F;
+    std::optional<float> output_clamp_lower;
+    std::optional<float> output_clamp_upper;
 };
 
 struct NormalizationStats {
     std::vector<float> mean;
     std::vector<float> stddev;
-    std::vector<float> q01;
-    std::vector<float> q99;
+    std::vector<float> lower;
+    std::vector<float> upper;
     std::vector<std::uint8_t> mask;
 };
 

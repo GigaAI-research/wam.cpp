@@ -99,11 +99,11 @@ void add_gwp05_statistics(MetadataFixture & fixture,
     std::vector<float> upper(32, 1.0F);
     std::vector<float> mask(32, 0.0F);
     std::fill_n(mask.begin(), 14, 1.0F);
-    fixture.set_f32_tensor(prefix + "state.q01", lower);
-    fixture.set_f32_tensor(prefix + "state.q99", upper);
+    fixture.set_f32_tensor(prefix + "state.lower", lower);
+    fixture.set_f32_tensor(prefix + "state.upper", upper);
     fixture.set_f32_tensor(prefix + "state.mask", mask);
-    fixture.set_f32_tensor(prefix + "action.q01", std::move(lower));
-    fixture.set_f32_tensor(prefix + "action.q99", std::move(upper));
+    fixture.set_f32_tensor(prefix + "action.lower", std::move(lower));
+    fixture.set_f32_tensor(prefix + "action.upper", std::move(upper));
     fixture.set_f32_tensor(prefix + "action.mask", std::move(mask));
 }
 
@@ -274,10 +274,10 @@ MetadataFixture valid_policy_fixture() {
     fixture.set_string("wam.normalization.action.kind", "min_max");
     fixture.set_bool("wam.normalization.action.clip", true);
     fixture.set_f32("wam.normalization.epsilon", 1.0e-6F);
-    fixture.set_f32_tensor("wam.norm.state.q01", {-1, -2, -3, 0});
-    fixture.set_f32_tensor("wam.norm.state.q99", {1, 2, 3, 1});
-    fixture.set_f32_tensor("wam.norm.action.q01", {-1, -2, -3, 0});
-    fixture.set_f32_tensor("wam.norm.action.q99", {1, 2, 3, 1});
+    fixture.set_f32_tensor("wam.norm.state.lower", {-1, -2, -3, 0});
+    fixture.set_f32_tensor("wam.norm.state.upper", {1, 2, 3, 1});
+    fixture.set_f32_tensor("wam.norm.action.lower", {-1, -2, -3, 0});
+    fixture.set_f32_tensor("wam.norm.action.upper", {1, 2, 3, 1});
     return fixture;
 }
 
@@ -393,8 +393,8 @@ MetadataFixture valid_gwp05_robotwin_14d_policy_fixture() {
     fixture.set_string("wam.normalization.action.kind", "z_score");
     for (const char * domain : {"state", "action"}) {
         const std::string prefix = std::string("wam.norm.") + domain;
-        fixture.remove(prefix + ".q01");
-        fixture.remove(prefix + ".q99");
+        fixture.remove(prefix + ".lower");
+        fixture.remove(prefix + ".upper");
         fixture.remove(prefix + ".mask");
         fixture.set_f32_tensor(prefix + ".mean",
                                std::vector<float>(14, 0.0F));

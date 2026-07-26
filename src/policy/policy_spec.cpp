@@ -144,10 +144,21 @@ NormalizationStats read_stats(const GgufReader & reader,
         return reader.read_f32_tensor(tensor_name);
     };
 
+    const bool has_current_range =
+        reader.find_tensor(prefix + "lower") != nullptr ||
+        reader.find_tensor(prefix + "upper") != nullptr;
+    const bool has_legacy_range =
+        reader.find_tensor(prefix + "q01") != nullptr ||
+        reader.find_tensor(prefix + "q99") != nullptr;
+    if (has_current_range && has_legacy_range) {
+        incompatible("normalization range mixes current and legacy tensors",
+                     prefix + "lower", "remove the q01/q99 development alias");
+    }
+
     stats.mean = read_optional("mean");
     stats.stddev = read_optional("std");
-    stats.q01 = read_optional("q01");
-    stats.q99 = read_optional("q99");
+    stats.lower = read_optional(has_current_range ? "lower" : "q01");
+    stats.upper = read_optional(has_current_range ? "upper" : "q99");
 
     const std::vector<float> raw_mask = read_optional("mask");
     stats.mask.reserve(raw_mask.size());
@@ -237,11 +248,26 @@ void validate_normalization(const NormalizationSpec & normalization,
                      "wam.normalization.epsilon",
                      "must be finite and positive when normalization is enabled");
     }
+    if (normalization.output_clamp_lower.has_value() !=
+        normalization.output_clamp_upper.has_value()) {
+        incompatible("normalization output clamp must define both bounds",
+                     "wam.normalization." + domain + ".output_clamp",
+                     "one bound is missing");
+    }
+    if (normalization.output_clamp_lower.has_value() &&
+        (!std::isfinite(*normalization.output_clamp_lower) ||
+         !std::isfinite(*normalization.output_clamp_upper) ||
+         *normalization.output_clamp_lower >=
+             *normalization.output_clamp_upper)) {
+        incompatible("normalization output clamp is invalid",
+                     "wam.normalization." + domain + ".output_clamp",
+                     "expected finite lower < upper");
+    }
 
     validate_stat_vector(stats.mean, model_dim, prefix + "mean");
     validate_stat_vector(stats.stddev, model_dim, prefix + "std");
-    validate_stat_vector(stats.q01, model_dim, prefix + "q01");
-    validate_stat_vector(stats.q99, model_dim, prefix + "q99");
+    validate_stat_vector(stats.lower, model_dim, prefix + "lower");
+    validate_stat_vector(stats.upper, model_dim, prefix + "upper");
     if (!stats.mask.empty() && stats.mask.size() != model_dim) {
         incompatible("normalization mask has the wrong length", prefix + "mask",
                      "expected " + std::to_string(model_dim));
@@ -260,7 +286,7 @@ void validate_normalization(const NormalizationSpec & normalization,
                          "none normalization has no clip interval");
         }
         if (!stats.mean.empty() || !stats.stddev.empty() ||
-            !stats.q01.empty() || !stats.q99.empty() || !stats.mask.empty()) {
+            !stats.lower.empty() || !stats.upper.empty() || !stats.mask.empty()) {
             incompatible("normalization kind none cannot carry statistics",
                          "wam.normalization." + domain + ".kind",
                          "statistics are present");
@@ -289,15 +315,15 @@ void validate_normalization(const NormalizationSpec & normalization,
         return;
     }
 
-    if (stats.q01.empty() || stats.q99.empty()) {
-        incompatible("range normalization requires q01 and q99 tensors",
+    if (stats.lower.empty() || stats.upper.empty()) {
+        incompatible("range normalization requires lower and upper tensors",
                      "wam.normalization." + domain + ".kind",
                      "missing statistics");
     }
     for (std::size_t index = 0; index < model_dim; ++index) {
         if (active_dimension(stats, index) &&
-            stats.q99[index] - stats.q01[index] <= normalization.epsilon) {
-            incompatible("normalization range is too small", prefix + "q99",
+            stats.upper[index] - stats.lower[index] <= normalization.epsilon) {
+            incompatible("normalization range is too small", prefix + "upper",
                          "index " + std::to_string(index));
         }
     }
@@ -441,8 +467,10 @@ std::optional<PolicySpecDraft> try_read_policy_spec_draft(
         "wam.input.language.truncation_side");
     spec.language.attention_mask_required =
         reader.require_bool("wam.input.language.attention_mask_required");
-    spec.language.special_token_ids =
-        reader.require_i32_array("wam.input.language.special_token_ids");
+    if (reader.has("wam.input.language.special_token_ids")) {
+        spec.language.special_token_ids =
+            reader.require_i32_array("wam.input.language.special_token_ids");
+    }
 
     spec.action.horizon = reader.require_u32("wam.output.action.horizon");
     spec.action.real_dim = reader.require_u32("wam.output.action.real_dim");
@@ -478,12 +506,28 @@ std::optional<PolicySpecDraft> try_read_policy_spec_draft(
         "wam.normalization.state.kind");
     spec.state.normalization.clip =
         reader.require_bool("wam.normalization.state.clip");
+    if (reader.has("wam.normalization.state.output_clamp_lower")) {
+        spec.state.normalization.output_clamp_lower = reader.require_f32(
+            "wam.normalization.state.output_clamp_lower");
+    }
+    if (reader.has("wam.normalization.state.output_clamp_upper")) {
+        spec.state.normalization.output_clamp_upper = reader.require_f32(
+            "wam.normalization.state.output_clamp_upper");
+    }
     spec.state.normalization.epsilon = epsilon;
     spec.action.normalization.kind = parse_normalization(
         reader.require_string("wam.normalization.action.kind"),
         "wam.normalization.action.kind");
     spec.action.normalization.clip =
         reader.require_bool("wam.normalization.action.clip");
+    if (reader.has("wam.normalization.action.output_clamp_lower")) {
+        spec.action.normalization.output_clamp_lower = reader.require_f32(
+            "wam.normalization.action.output_clamp_lower");
+    }
+    if (reader.has("wam.normalization.action.output_clamp_upper")) {
+        spec.action.normalization.output_clamp_upper = reader.require_f32(
+            "wam.normalization.action.output_clamp_upper");
+    }
     spec.action.normalization.epsilon = epsilon;
 
     spec.state.stats = read_stats(reader, "state", spec.state.model_dim);

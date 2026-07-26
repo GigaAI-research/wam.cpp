@@ -183,6 +183,61 @@ if(WAM_BUILD_GWP05)
     endif()
 endif()
 
+if(WAM_BUILD_FASTWAM)
+    wam_add_test(wam_fastwam_semantics unit/fastwam_semantics.cpp)
+
+    add_executable(wam_fastwam_libero_artifact
+        integration/fastwam_libero_artifact.cpp)
+    target_link_libraries(wam_fastwam_libero_artifact PRIVATE wam::core)
+    target_include_directories(wam_fastwam_libero_artifact PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/src)
+    target_compile_features(wam_fastwam_libero_artifact PRIVATE cxx_std_17)
+    target_compile_options(wam_fastwam_libero_artifact PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+
+    if(WAM_TEST_FASTWAM_LIBERO_GGUF)
+        if(NOT IS_ABSOLUTE "${WAM_TEST_FASTWAM_LIBERO_GGUF}" OR
+           NOT EXISTS "${WAM_TEST_FASTWAM_LIBERO_GGUF}")
+            message(FATAL_ERROR
+                "WAM_TEST_FASTWAM_LIBERO_GGUF must name an existing absolute file")
+        endif()
+        add_test(NAME wam_fastwam_libero_artifact
+            COMMAND wam_fastwam_libero_artifact
+                "${WAM_TEST_FASTWAM_LIBERO_GGUF}")
+        set_tests_properties(wam_fastwam_libero_artifact PROPERTIES
+            LABELS "integration;fastwam;artifact;libero;external"
+            TIMEOUT 120)
+    else()
+        message(STATUS
+            "wam: skipping FastWAM LIBERO artifact Gate B; set WAM_TEST_FASTWAM_LIBERO_GGUF")
+    endif()
+
+    if(WAM_CUDA AND WAM_TEST_FASTWAM_LIBERO_GGUF AND
+       WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR)
+        if(NOT IS_ABSOLUTE "${WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR}" OR
+           NOT IS_DIRECTORY "${WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR}")
+            message(FATAL_ERROR
+                "WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR must name an existing absolute directory")
+        endif()
+        add_executable(wam_fastwam_libero_parity
+            integration/fastwam_libero_parity.cpp)
+        target_link_libraries(wam_fastwam_libero_parity PRIVATE wam::core)
+        target_include_directories(wam_fastwam_libero_parity PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR})
+        target_compile_features(wam_fastwam_libero_parity PRIVATE cxx_std_17)
+        target_compile_options(wam_fastwam_libero_parity PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+        add_test(NAME wam_fastwam_libero_parity
+            COMMAND wam_fastwam_libero_parity
+                "${WAM_TEST_FASTWAM_LIBERO_GGUF}"
+                "${WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR}")
+        set_tests_properties(wam_fastwam_libero_parity PROPERTIES
+            LABELS "fastwam;libero;cuda;parity;external"
+            RUN_SERIAL TRUE)
+    endif()
+endif()
+
 target_include_directories(wam_registry_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_model_lifecycle PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_gguf_reader_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -195,6 +250,11 @@ if(WAM_BUILD_GWP05)
     target_include_directories(wam_gwp05_semantics PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_include_directories(wam_gwp05_engine PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_include_directories(wam_gwp05_inputs PRIVATE ${PROJECT_SOURCE_DIR}/src)
+endif()
+
+if(WAM_BUILD_FASTWAM)
+    target_include_directories(wam_fastwam_semantics PRIVATE
+        ${PROJECT_SOURCE_DIR}/src)
 endif()
 
 foreach(target IN ITEMS
@@ -270,5 +330,11 @@ if(WAM_BUILD_SERVING AND TARGET wam_proto_descriptor)
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_protocol.py
             --descriptor ${WAM_PROTO_DESCRIPTOR})
     set_tests_properties(wam_rpc_protocol PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+
+    add_test(NAME wam_language_provider
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_language_provider.py)
+    set_tests_properties(wam_language_provider PROPERTIES
         ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
 endif()

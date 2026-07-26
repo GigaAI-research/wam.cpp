@@ -11,7 +11,7 @@ static_assert(std::is_destructible<wam::Prediction>::value,
               "public Prediction must be a complete type");
 static_assert(sizeof(wam_c_model_options) > 0,
               "serving C ABI options must be a complete C type");
-static_assert(WAM_C_ABI_VERSION == 2U, "unexpected serving C ABI version");
+static_assert(WAM_C_ABI_VERSION == 3U, "unexpected serving C ABI version");
 
 int main() {
     wam::Model * model = nullptr;

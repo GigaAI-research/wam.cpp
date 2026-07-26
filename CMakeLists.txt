@@ -34,6 +34,10 @@ set(WAM_TEST_GWP05_ROBOTWIN_INPUT_DIR "" CACHE PATH
     "Optional frozen 14D RoboTwin observation used by Gate A")
 set(WAM_TEST_GWP05_ROBOTWIN_REFERENCE_DIR "" CACHE PATH
     "Optional independent PyTorch BF16 reference used by Gate A")
+set(WAM_TEST_FASTWAM_LIBERO_GGUF "" CACHE FILEPATH
+    "Optional FastWAM LIBERO PolicySpec GGUF used by Gate B")
+set(WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR "" CACHE PATH
+    "Optional frozen FastWAM LIBERO replay used by Gate B CUDA parity")
 
 if(WAM_CUDNN AND NOT WAM_CUDA)
     message(FATAL_ERROR "WAM_CUDNN requires WAM_CUDA=ON")
@@ -62,6 +66,7 @@ add_library(wam_core STATIC
     src/models/common/scheduler.cpp
     src/policy/action_ops.cpp
     src/policy/image_ops.cpp
+    src/policy/language_ops.cpp
     src/policy/policy_spec.cpp
     src/policy/state_ops.cpp
 )
@@ -94,7 +99,19 @@ if(WAM_BUILD_GWP05)
 endif()
 
 if(WAM_BUILD_FASTWAM)
-    target_sources(wam_core PRIVATE src/models/fastwam/model.cpp)
+    target_sources(wam_core PRIVATE
+        src/models/fastwam/artifact.cpp
+        src/models/fastwam/engine/action_dit.cpp
+        src/models/fastwam/engine/debug.cpp
+        src/models/fastwam/engine/engine.cpp
+        src/models/fastwam/engine/ops.cpp
+        src/models/fastwam/engine/pipeline.cpp
+        src/models/fastwam/engine/scheduler.cpp
+        src/models/fastwam/engine/vae.cpp
+        src/models/fastwam/engine/video_dit.cpp
+        src/models/fastwam/inputs.cpp
+        src/models/fastwam/model.cpp
+        src/models/fastwam/semantics.cpp)
 endif()
 
 target_include_directories(wam_core

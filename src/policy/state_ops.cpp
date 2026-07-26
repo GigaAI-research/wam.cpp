@@ -66,12 +66,17 @@ void normalize_state_reference(std::vector<float> & state,
                 break;
             case NormalizationKind::min_max:
             case NormalizationKind::quantile:
-                value = ((value - stats.q01[index]) /
-                         (stats.q99[index] - stats.q01[index])) * 2.0F - 1.0F;
+                value = ((value - stats.lower[index]) /
+                         (stats.upper[index] - stats.lower[index])) * 2.0F - 1.0F;
                 if (spec.normalization.clip) {
                     value = std::max(-1.0F, std::min(1.0F, value));
                 }
                 break;
+        }
+        if (spec.normalization.output_clamp_lower.has_value()) {
+            value = std::max(*spec.normalization.output_clamp_lower,
+                             std::min(*spec.normalization.output_clamp_upper,
+                                      value));
         }
         if (!std::isfinite(value)) {
             throw Error(ErrorCode::invalid_argument,

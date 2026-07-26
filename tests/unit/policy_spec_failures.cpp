@@ -90,9 +90,9 @@ int main() {
     }
     {
         auto fixture = wam::test::valid_policy_fixture();
-        fixture.set_f32_tensor("wam.norm.state.q01", {-1, -2, -3});
+        fixture.set_f32_tensor("wam.norm.state.lower", {-1, -2, -3});
         expect_failure(std::move(fixture), "stats-shape",
-                       "wam.norm.state.q01");
+                       "wam.norm.state.lower");
     }
     {
         auto fixture = wam::test::valid_gwp05_robotwin_14d_policy_fixture();

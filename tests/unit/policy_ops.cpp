@@ -153,8 +153,8 @@ int main() {
     state_spec.model_dim = 4;
     state_spec.pad_value = 7.0F;
     state_spec.normalization = {NormalizationKind::quantile, false, 1.0e-8F};
-    state_spec.stats.q01 = {0.0F, 0.0F, 0.0F, 0.0F};
-    state_spec.stats.q99 = {10.0F, 10.0F, 1.0F, 1.0F};
+    state_spec.stats.lower = {0.0F, 0.0F, 0.0F, 0.0F};
+    state_spec.stats.upper = {10.0F, 10.0F, 1.0F, 1.0F};
     state_spec.stats.mask = {1, 1, 0, 0};
     const std::vector<float> raw_state_values = {0.0F, 5.0F};
     const wam::TensorView raw_state =
@@ -184,8 +184,8 @@ int main() {
     action_spec.model_dim = 3;
     action_spec.normalization =
         {NormalizationKind::quantile, false, 1.0e-8F};
-    action_spec.stats.q01 = {0.0F, 10.0F, 0.0F};
-    action_spec.stats.q99 = {2.0F, 20.0F, 1.0F};
+    action_spec.stats.lower = {0.0F, 10.0F, 0.0F};
+    action_spec.stats.upper = {2.0F, 20.0F, 1.0F};
     action_spec.stats.mask = {1, 1, 0};
     action_spec.recovery.kind = ActionRecoveryKind::add_current_state;
     action_spec.recovery.reference_state_indices = {0, -1};
@@ -208,13 +208,15 @@ int main() {
     z_action_spec.model_dim = 2;
     z_action_spec.normalization =
         {NormalizationKind::z_score, false, 1.0e-6F};
+    z_action_spec.normalization.output_clamp_lower = -1.0F;
+    z_action_spec.normalization.output_clamp_upper = 1.0F;
     z_action_spec.stats.mean = {10.0F, -2.0F};
     z_action_spec.stats.stddev = {2.0F, 0.5F};
     z_action_spec.recovery.kind = ActionRecoveryKind::identity;
     const PolicyActionChunk z_decoded = decode_action_reference(
         {1.0F, 2.0F}, {}, z_action_spec, z_action_spec.stats);
-    require(z_decoded.values == std::vector<float>({12.0F, -1.0F}),
-            "z-score action unnormalization changed");
+    require(z_decoded.values == std::vector<float>({12.0F, -1.5F}),
+            "action output clamp or z-score unnormalization changed");
 
     const std::vector<float> explicit_values(6, 0.25F);
     const wam::TensorView explicit_noise =

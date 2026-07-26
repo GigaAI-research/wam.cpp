@@ -37,12 +37,12 @@ int main() {
                 "wam.input.image.composition.wrist.rect")[0] == 2,
             "u32 array metadata read failed");
     require(reader->tensor_count() == 4, "fixture tensor count changed");
-    require(reader->require_tensor("wam.norm.action.q99").dtype ==
+    require(reader->require_tensor("wam.norm.action.upper").dtype ==
                 wam::DType::f32,
             "tensor dtype mapping failed");
-    require(reader->read_f32_tensor("wam.norm.action.q99")[2] == 3.0F,
+    require(reader->read_f32_tensor("wam.norm.action.upper")[2] == 3.0F,
             "F32 tensor payload read failed");
-    reader->require_shape("wam.norm.action.q99", {4});
+    reader->require_shape("wam.norm.action.upper", {4});
 
     require_error(
         [&] { (void) reader->require_string("missing.key"); },
@@ -51,7 +51,7 @@ int main() {
         [&] { (void) reader->require_u32("general.architecture"); },
         wam::ErrorCode::incompatible_artifact, "wrong metadata type");
     require_error(
-        [&] { reader->require_shape("wam.norm.action.q99", {3}); },
+        [&] { reader->require_shape("wam.norm.action.upper", {3}); },
         wam::ErrorCode::incompatible_artifact, "wrong tensor shape");
     require_error(
         [&] { (void) reader->read_f32_tensor("missing.tensor"); },

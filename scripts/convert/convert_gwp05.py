@@ -45,6 +45,7 @@ from common.gwp05_gguf import (  # noqa: E402
 KV = kv
 DEFAULT_TRANSFORMER_FILE = "diffusion_pytorch_model.bin"
 DEFAULT_STATS_KEYS = ("mean", "std", "q01", "q99")
+POLICY_BOUND_NAMES = {"q01": "lower", "q99": "upper"}
 TORCH_DTYPE_NAMES = {torch.float32: "F32", torch.bfloat16: "BF16"}
 
 
@@ -535,7 +536,8 @@ def _load_stats(path: Path, action_dim: int) -> dict[str, np.ndarray]:
             value = np.ascontiguousarray(value[:action_dim])
             if not np.all(np.isfinite(value)):
                 raise SystemExit(f"{source_name}.{stat_name} contains NaN/Inf")
-            result[f"wam.norm.{output_name}.{stat_name}"] = value
+            output_stat_name = POLICY_BOUND_NAMES.get(stat_name, stat_name)
+            result[f"wam.norm.{output_name}.{output_stat_name}"] = value
     return result
 
 

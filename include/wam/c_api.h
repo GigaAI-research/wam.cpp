@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define WAM_C_ABI_VERSION 2U
+#define WAM_C_ABI_VERSION 3U
 
 #if defined(_WIN32)
 #  if defined(WAM_C_API_BUILD)
@@ -67,6 +67,8 @@ typedef struct wam_c_predict_inputs {
     size_t token_count;
     wam_c_tensor_view state;
     wam_c_tensor_view action_noise;
+    wam_c_tensor_view embedding;
+    wam_c_tensor_view embedding_attention_mask;
 } wam_c_predict_inputs;
 
 typedef struct wam_c_phase_timing {

@@ -512,7 +512,16 @@ p95 分别为 `136.02/134.56/127.46 ms`；峰值 device memory 为 `21.90 GiB`�
 4. 逐层对齐中间 tensor 和最终 action；
 5. video/world noise/output 和 joint/video public mode 保持 unsupported。
 
-FastWAM 用于验证公共抽象没有被 GWP 特例塑形。Gate B 检查公共函数没有 architecture/environment 分支，并在通过后冻结 PolicySpec GGUF key、Proto field number 和主要 ABI。Gate B 前生成的 development artifact 必须重新转换。
+FastWAM 用于验证公共抽象没有被 GWP 特例塑形。首个 Gate B profile `fastwam_libero_2cam224_minmax` 已完成 converter、1741-tensor GGUF、artifact/semantics/input contract、私有 CUDA/BF16 engine 和公开 Model/Session 纵向接入。固定 `[32,7]` replay 相对 PyTorch 的 MAE 为 `0.000901506`、max 为 `0.00549316`，并与 donor C++ 最终 action 逐 bit 相同。Gate B 同时修正并冻结了 `lower/upper` stats 命名、state output clamp，以及 architecture `norm_eps` 与 policy normalization epsilon 的独立所有权。
+
+FastWAM external-embedding serving 已于 2026-07-26 闭环：RPC wire 继续传原始
+instruction，server 根据 PolicySpec 持有 Wan UMT5 tokenizer/encoder 和有界 prompt
+cache；C ABI v3 将 BF16 `[128,4096]` embedding 与 I32 mask 传入公共
+`EmbeddingInput`。跨 `liberox` client 与 `gwp_zyj` server 的
+`libero_spatial/task 0/episode 0` 在 85 个控制步成功，共 9 次 action-chunk 请求；
+首请求 `model_text=405.42 ms`，后续 prompt-cache 命中时为 0，全部请求 server total
+mean/median 为 `749.42/649.62 ms`。这是单 episode integration gate，不替代后续固定
+manifest 的多任务成功率评测。
 
 ### 15.2 Eval
 
@@ -561,4 +570,4 @@ server 做权威 PolicySpec/EnvironmentContract compatibility check；client 持
 
 ## 18. 下一步
 
-Slice 6、Gate A、Slice 7 和 GWP05 RoboTwin 固定 manifest 100 次正式评测均已完成：正式 14D z-score RoboTwin PolicySpec GGUF、真实 fixture、独立 PyTorch BF16 oracle、公开 CUDA/BF16 Session parity、C ABI、WebSocket binary + Protobuf serving 和连接级 session 状态机均已通过，正式成功率为 `87/100`。下一步进入 FastWAM Gate B，并复用同一 manifest 与延迟口径验证 FastWAM RoboTwin；1/1 integration smoke test 仍只作为链路验证。
+Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值和 serving 纵向验证均已完成。FastWAM server-owned external embedding、C ABI v3 和 LIBERO 单 episode 已闭环。下一步实现 LIBERO 固定 manifest 多 episode runner，冻结 task/init-state/seed、reset、恢复运行、成功率和延迟统计口径；通过后再进入 FastWAM RoboTwin profile 和 LIBERO-X。

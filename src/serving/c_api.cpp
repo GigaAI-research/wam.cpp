@@ -110,11 +110,23 @@ wam::Inputs runtime_inputs(const wam_c_predict_inputs & source) {
             image.data, image.byte_size, image.width, image.height,
             image.channels, image.row_stride_bytes});
     }
-    if (source.token_count != 0) {
+    const bool has_tokens = source.token_count != 0;
+    const bool has_embedding = source.embedding.data != nullptr ||
+                               source.embedding.byte_size != 0 ||
+                               source.embedding.rank != 0;
+    require(!(has_tokens && has_embedding),
+            "token and embedding language inputs are mutually exclusive",
+            "inputs.language");
+    if (has_tokens) {
         result.language = wam::TokenInput{
             wam::ArrayView<std::int32_t>(source.token_ids, source.token_count),
             wam::ArrayView<std::int32_t>(source.attention_mask,
                                          source.token_count)};
+    } else if (has_embedding) {
+        result.language = wam::EmbeddingInput{
+            tensor_view(source.embedding, "inputs.language.embedding"),
+            tensor_view(source.embedding_attention_mask,
+                        "inputs.language.attention_mask")};
     }
     result.state = tensor_view(source.state, "inputs.state");
     result.action_noise = tensor_view(source.action_noise,

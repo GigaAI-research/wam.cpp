@@ -54,7 +54,9 @@ class _PredictInputs(C.Structure):
                 ("token_ids", C.POINTER(C.c_int32)),
                 ("attention_mask", C.POINTER(C.c_int32)),
                 ("token_count", C.c_size_t), ("state", _TensorView),
-                ("action_noise", _TensorView)]
+                ("action_noise", _TensorView),
+                ("embedding", _TensorView),
+                ("embedding_attention_mask", _TensorView)]
 
 
 class _PhaseTiming(C.Structure):
@@ -82,6 +84,7 @@ class _Prediction(C.Structure):
 
 BACKENDS = {"automatic": 1, "cuda": 2, "cpu-metadata": 3}
 PRECISIONS = {"automatic": 1, "f32": 2, "f16": 3, "bf16": 4}
+LANGUAGE_MODES = {"automatic": 0, "tokens": 1, "external_embedding": 2}
 
 
 def _configure(lib):
@@ -112,30 +115,31 @@ def _check(lib, status, error):
     raise NativeError(code, message, details)
 
 
-def _tensor_view(array, dtype_code):
+def _tensor_view(array, dtype_code, layout=b""):
     if array is None:
         return _TensorView(None, 0, 0, None, 0, b"", 3), None
     array = np.ascontiguousarray(array)
     shape = (C.c_int64 * array.ndim)(*array.shape)
     view = _TensorView(array.ctypes.data, array.nbytes, dtype_code, shape,
-                       array.ndim, b"", 1)
+                       array.ndim, layout, 1)
     return view, (array, shape)
 
 
 class NativeModel:
     def __init__(self, library, artifact, backend="cuda", precision="bf16",
-                 device=0, prompt_cache_capacity=4):
+                 device=0, prompt_cache_capacity=4, language_mode="automatic"):
         self.lib = C.CDLL(str(Path(library).resolve()))
         _configure(self.lib)
         abi_version = self.lib.wam_c_abi_version()
-        if abi_version != 2:
+        if abi_version != 3:
             raise RuntimeError(
-                f"wam C ABI version mismatch: expected 2, got {abi_version}")
+                f"wam C ABI version mismatch: expected 3, got {abi_version}")
         self.handle = C.c_void_p()
         path = str(Path(artifact).resolve()).encode()
         options = _ModelOptions(C.sizeof(_ModelOptions), path, BACKENDS[backend],
                                 PRECISIONS[precision], device,
-                                prompt_cache_capacity, 1)
+                                prompt_cache_capacity,
+                                LANGUAGE_MODES[language_mode])
         error = _Error()
         _check(self.lib, self.lib.wam_c_model_create(
             C.byref(options), C.byref(self.handle), C.byref(error)), error)
@@ -171,7 +175,8 @@ class NativeSession:
         _check(model.lib, model.lib.wam_c_session_create(
             model.handle, C.byref(options), C.byref(self.handle), C.byref(error)), error)
 
-    def predict(self, images, state, token_ids, attention_mask, action_noise=None):
+    def predict(self, images, state, language_values, attention_mask,
+                action_noise=None):
         keepalive = []
         image_array = (_Image * len(images))()
         for index, item in enumerate(images):
@@ -185,14 +190,34 @@ class NativeSession:
             np.ascontiguousarray(state, dtype=np.float32), 3)
         noise_view, noise_keep = _tensor_view(
             None if action_noise is None else np.ascontiguousarray(action_noise, dtype=np.float32), 3)
-        token_ids = np.ascontiguousarray(token_ids, dtype=np.int32)
-        attention_mask = np.ascontiguousarray(attention_mask, dtype=np.int32)
-        keepalive.extend((image_array, state_keep, noise_keep, token_ids, attention_mask))
+        mode = self.model.metadata["language_mode"]
+        empty_view, _ = _tensor_view(None, 0)
+        token_ids = None
+        embedding_keep = mask_keep = None
+        embedding_view = mask_view = empty_view
+        token_pointer = mask_pointer = None
+        token_count = 0
+        if mode == "tokens":
+            token_ids = np.ascontiguousarray(language_values, dtype=np.int32)
+            attention_mask = np.ascontiguousarray(attention_mask, dtype=np.int32)
+            token_pointer = token_ids.ctypes.data_as(C.POINTER(C.c_int32))
+            mask_pointer = attention_mask.ctypes.data_as(C.POINTER(C.c_int32))
+            token_count = token_ids.size
+        elif mode == "external_embedding":
+            embedding = np.ascontiguousarray(language_values)
+            if embedding.dtype != np.uint16:
+                raise ValueError("external embedding must use BF16 uint16 storage")
+            mask = np.ascontiguousarray(attention_mask, dtype=np.int32)
+            embedding_view, embedding_keep = _tensor_view(embedding, 4, b"T,D")
+            mask_view, mask_keep = _tensor_view(mask, 2, b"T")
+        else:
+            raise ValueError(f"unsupported native language mode: {mode}")
+        keepalive.extend((image_array, state_keep, noise_keep, token_ids,
+                          attention_mask, embedding_keep, mask_keep))
         inputs = _PredictInputs(
             image_array, len(images),
-            token_ids.ctypes.data_as(C.POINTER(C.c_int32)),
-            attention_mask.ctypes.data_as(C.POINTER(C.c_int32)),
-            token_ids.size, state_view, noise_view)
+            token_pointer, mask_pointer, token_count, state_view, noise_view,
+            embedding_view, mask_view)
         output = _Prediction()
         error = _Error()
         _check(self.model.lib, self.model.lib.wam_c_session_predict(

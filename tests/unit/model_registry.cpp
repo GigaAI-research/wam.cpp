@@ -30,8 +30,8 @@ void verify_builtin(wam::internal::Arch arch, bool expected) {
                 (*factory)(wam::ModelOptions{}, wam::ModelInfo{}, std::nullopt,
                            nullptr);
             },
-            wam::ErrorCode::unsupported,
-            "FastWAM factory must remain unsupported");
+            wam::ErrorCode::incompatible_artifact,
+            "FastWAM factory must reject a missing artifact contract");
     }
 }
 

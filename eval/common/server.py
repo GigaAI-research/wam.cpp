@@ -13,6 +13,7 @@ import numpy as np
 from google.protobuf import json_format
 
 from common.native import NativeError, NativeModel
+from common.language import create_language_provider
 from common.rpc import decode_tensor, encode_tensor, load_types
 
 
@@ -61,21 +62,11 @@ def check_environment(metadata, contract):
         raise ValueError(f"{contract.environment_id} contract incompatible: " + "; ".join(failures))
 
 
-def check_tokenizer(metadata, tokenizer):
-    language = metadata["policy_spec"]["language"]
-    family = language["tokenizer_family"].lower()
-    class_name = type(tokenizer).__name__.lower()
-    if family == "umt5" and "t5tokenizer" not in class_name:
-        raise ValueError(f"profile requires an UMT5/T5 tokenizer, got {type(tokenizer).__name__}")
-    if int(language["max_tokens"]) <= 0:
-        raise ValueError("PolicySpec language.max_tokens must be positive")
-
-
 class WamServer:
-    def __init__(self, model, tokenizer, descriptor, contract, host, port,
+    def __init__(self, model, language_provider, descriptor, contract, host, port,
                  random_seed=0, max_message_bytes=64 << 20):
         self.model = model
-        self.tokenizer = tokenizer
+        self.language_provider = language_provider
         self.types = load_types(descriptor)
         self.contract = contract
         self.host = host
@@ -111,16 +102,6 @@ class WamServer:
             return request_id, 2, field, str(error), True
         return request_id, 5, field, str(error), True
 
-    def _tokenize(self, instruction):
-        language = self.model.metadata["policy_spec"]["language"]
-        prompt = language["prompt_template"].replace("{task}", instruction)
-        encoded = self.tokenizer(
-            prompt, padding="max_length", truncation=True,
-            max_length=int(language["max_tokens"]), return_attention_mask=True,
-            add_special_tokens=True)
-        return (np.asarray(encoded["input_ids"], dtype=np.int32),
-                np.asarray(encoded["attention_mask"], dtype=np.int32))
-
     @staticmethod
     def _decode_images(observation):
         from PIL import Image as PilImage
@@ -146,20 +127,33 @@ class WamServer:
             result.append({"name": wire.name, "data": pixels})
         return result
 
-    async def _predict(self, session, request):
+    def _predict_blocking(self, session, request):
         observation = request.observation
         images = self._decode_images(observation)
         state = decode_tensor(observation.state)
         if state.dtype != np.float32 or state.ndim != 1:
             raise ValueError(f"state must be rank-1 F32, got {state.dtype} {state.shape}")
-        token_ids, attention_mask = self._tokenize(observation.instruction)
+        language = self.language_provider.prepare(observation.instruction)
         noise = decode_tensor(request.action_noise) if request.HasField("action_noise") else None
+        action, stats = session.predict(
+            images, state, language.values, language.attention_mask, noise)
+        stats["preprocess_milliseconds"] += language.preprocess_milliseconds
+        stats["model_text_milliseconds"] += language.model_milliseconds
+        stats["model_milliseconds"] += language.model_milliseconds
+        stats["total_milliseconds"] += (
+            language.preprocess_milliseconds + language.model_milliseconds)
+        if language.model_milliseconds:
+            stats["model_timings"].insert(0, {
+                "name": "language_encoder",
+                "milliseconds": language.model_milliseconds,
+            })
+        return action, stats
+
+    async def _predict(self, session, request):
         if self.inference_lock is None:
-            return await asyncio.to_thread(
-                session.predict, images, state, token_ids, attention_mask, noise)
+            return await asyncio.to_thread(self._predict_blocking, session, request)
         async with self.inference_lock:
-            return await asyncio.to_thread(
-                session.predict, images, state, token_ids, attention_mask, noise)
+            return await asyncio.to_thread(self._predict_blocking, session, request)
 
     async def _reset(self, session):
         if self.inference_lock is None:
@@ -301,7 +295,11 @@ def serve_main(contract, argv=None):
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--descriptor", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--tokenizer", type=Path, required=True)
+    parser.add_argument("--tokenizer", type=Path)
+    parser.add_argument("--text-encoder", type=Path)
+    parser.add_argument("--language-python-root", type=Path)
+    parser.add_argument("--language-device")
+    parser.add_argument("--language-cache-capacity", type=int, default=32)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=18060)
     parser.add_argument("--backend", choices=("automatic", "cuda", "cpu-metadata"), default="cuda")
@@ -309,21 +307,24 @@ def serve_main(contract, argv=None):
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--random-seed", type=int, default=0)
     parser.add_argument("--prompt-cache-capacity", type=int, default=4)
+    parser.add_argument("--language-mode",
+                        choices=("automatic", "tokens", "external_embedding"),
+                        default="automatic")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper()),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer, local_files_only=True, trust_remote_code=False)
     model = NativeModel(args.library, args.model, args.backend, args.precision,
-                        args.device, args.prompt_cache_capacity)
+                        args.device, args.prompt_cache_capacity,
+                        args.language_mode)
     try:
         check_environment(model.metadata, contract)
-        check_tokenizer(model.metadata, tokenizer)
-        if model.metadata["language_mode"] != "tokens":
-            raise ValueError("raw-instruction serving requires token language mode")
-        asyncio.run(WamServer(model, tokenizer, args.descriptor, contract,
+        language_device = args.language_device or f"cuda:{args.device}"
+        provider = create_language_provider(
+            model.metadata, tokenizer_path=args.tokenizer,
+            encoder_path=args.text_encoder, python_root=args.language_python_root,
+            device=language_device, cache_capacity=args.language_cache_capacity)
+        asyncio.run(WamServer(model, provider, args.descriptor, contract,
                               args.host, args.port, args.random_seed).serve())
     finally:
         model.close()

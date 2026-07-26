@@ -64,6 +64,11 @@ PolicyActionChunk decode_action_reference(
              ++dimension) {
             float value = normalized_action[step * spec.model_dim + dimension];
             if (active(stats, dimension)) {
+                if (spec.normalization.output_clamp_lower.has_value()) {
+                    value = std::max(
+                        *spec.normalization.output_clamp_lower,
+                        std::min(*spec.normalization.output_clamp_upper, value));
+                }
                 if (spec.normalization.clip &&
                     (spec.normalization.kind == NormalizationKind::min_max ||
                      spec.normalization.kind == NormalizationKind::quantile)) {
@@ -79,9 +84,9 @@ PolicyActionChunk decode_action_reference(
                     case NormalizationKind::min_max:
                     case NormalizationKind::quantile:
                         value = ((value + 1.0F) * 0.5F) *
-                                    (stats.q99[dimension] -
-                                     stats.q01[dimension]) +
-                                stats.q01[dimension];
+                                    (stats.upper[dimension] -
+                                     stats.lower[dimension]) +
+                                stats.lower[dimension];
                         break;
                 }
             }

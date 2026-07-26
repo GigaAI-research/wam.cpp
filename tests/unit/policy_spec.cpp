@@ -30,7 +30,7 @@ int main() {
             "canvas placements were not loaded");
     require(spec.state.real_dim == 3 && spec.state.model_dim == 4,
             "state dimensions were not loaded");
-    require(spec.state.stats.q01.size() == 4,
+    require(spec.state.stats.lower.size() == 4,
             "state statistics were not loaded");
     require(spec.language.input_mode ==
                 wam::internal::policy::LanguageInputMode::tokens,

@@ -153,8 +153,8 @@ policy::NormalizationStats read_legacy_stats(const GgufReader & reader,
     const std::string q99 = domain + "_q99";
     reader.require_shape(q01, {static_cast<std::int64_t>(model_dim)});
     reader.require_shape(q99, {static_cast<std::int64_t>(model_dim)});
-    stats.q01 = reader.read_f32_tensor(q01);
-    stats.q99 = reader.read_f32_tensor(q99);
+    stats.lower = reader.read_f32_tensor(q01);
+    stats.upper = reader.read_f32_tensor(q99);
     stats.mask.assign(model_dim, 0);
     std::fill_n(stats.mask.begin(), real_dim, 1);
     return stats;
@@ -305,10 +305,10 @@ void validate_artifact(const ArtifactContract & artifact,
     cross_check_u32(reader, "gwp05.image_width",
                     policy_spec.images.composition.width);
 
-    cross_check_stat(reader, "state_q01", policy_spec.state.stats.q01);
-    cross_check_stat(reader, "state_q99", policy_spec.state.stats.q99);
-    cross_check_stat(reader, "action_q01", policy_spec.action.stats.q01);
-    cross_check_stat(reader, "action_q99", policy_spec.action.stats.q99);
+    cross_check_stat(reader, "state_q01", policy_spec.state.stats.lower);
+    cross_check_stat(reader, "state_q99", policy_spec.state.stats.upper);
+    cross_check_stat(reader, "action_q01", policy_spec.action.stats.lower);
+    cross_check_stat(reader, "action_q99", policy_spec.action.stats.upper);
 
     if (artifact.geometry.t5_max_length < semantics::kPromptTokens ||
         artifact.geometry.t5_max_length < policy_spec.language.max_tokens) {

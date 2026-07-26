@@ -78,9 +78,11 @@ message NormalizationSpec {
   float epsilon = 3;
   repeated float mean = 4;
   repeated float stddev = 5;
-  repeated float q01 = 6;
-  repeated float q99 = 7;
+  repeated float lower = 6;
+  repeated float upper = 7;
   repeated uint32 mask = 8;
+  optional float output_clamp_lower = 9;
+  optional float output_clamp_upper = 10;
 }
 
 message ImageTransformSpec {

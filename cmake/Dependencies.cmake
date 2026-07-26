@@ -25,11 +25,11 @@ function(wam_configure_gguf_dependency)
     file(SHA256 "${fusion_patch}" fusion_patch_sha256)
     file(SHA256 "${bf16_patch}" bf16_patch_sha256)
     if(NOT fusion_patch_sha256 STREQUAL
-            "4e5fb3d09bec3cee09a8dd3aeb3d31d3a7d507ba5b260a491bcee56399188f54")
+            "2133e4530df643b5f90671154efba655b59904965d23033aa93ee5ec2570623b")
         message(FATAL_ERROR "Pinned llama.cpp fusion patch hash differs")
     endif()
     if(NOT bf16_patch_sha256 STREQUAL
-            "e9f21832755d3e5425c2bd35fab3c0c0a00e667343dd01aedc4bf3d8ed146eef")
+            "3c9f76aefc7fab3a6e1f9c66b4d8cb62802877e328c27a601d0f728eb69b6add")
         message(FATAL_ERROR "Pinned llama.cpp native-BF16 patch hash differs")
     endif()
 

@@ -14,8 +14,8 @@ int main() {
     options.artifact_path = valid_file.string();
     wam::test::require_error(
         [&] { (void) wam::model_load(options); },
-        wam::ErrorCode::unsupported,
-        "valid metadata must reach the architecture unsupported path");
+        wam::ErrorCode::incompatible_artifact,
+        "valid PolicySpec must reach FastWAM artifact validation");
 
     wam::test::TempFile malformed_file("model-load-malformed");
     wam::test::MetadataFixture malformed = wam::test::valid_policy_fixture();

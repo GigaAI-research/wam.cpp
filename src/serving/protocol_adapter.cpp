@@ -130,12 +130,18 @@ void normalization_json(std::ostringstream & output,
     numeric_array(output, stats.mean);
     output << ",\"stddev\":";
     numeric_array(output, stats.stddev);
-    output << ",\"q01\":";
-    numeric_array(output, stats.q01);
-    output << ",\"q99\":";
-    numeric_array(output, stats.q99);
+    output << ",\"lower\":";
+    numeric_array(output, stats.lower);
+    output << ",\"upper\":";
+    numeric_array(output, stats.upper);
     output << ",\"mask\":";
     numeric_array(output, stats.mask);
+    if (spec.output_clamp_lower.has_value()) {
+        output << ",\"output_clamp_lower\":"
+               << *spec.output_clamp_lower
+               << ",\"output_clamp_upper\":"
+               << *spec.output_clamp_upper;
+    }
     output << '}';
 }
 

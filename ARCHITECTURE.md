@@ -503,16 +503,14 @@ wam.input.state.fields = [
   "gripper.left", "gripper.right"
 ]
 
-wam.input.language.input_mode = "tokens"
-wam.input.language.prompt_template = "Act: {task}"
-wam.input.language.tokenizer_family = "..."       # provenance only
+wam.input.language.input_mode = "embedding"
+wam.input.language.tokenizer_family = "umt5"
 wam.input.language.tokenizer_revision = "..."     # provenance only
-wam.input.language.max_tokens = 512
-wam.input.language.text_encoder_in_artifact = true
+wam.input.language.max_tokens = 128
+wam.input.language.text_encoder_in_artifact = false
 wam.input.language.padding_side = "right"
 wam.input.language.truncation_side = "right"
 wam.input.language.attention_mask_required = true
-wam.input.language.special_token_ids = [0, 1]
 
 wam.output.action.horizon = 32
 wam.output.action.real_dim = 7
@@ -528,14 +526,17 @@ wam.output.action.gripper = "continuous"
 wam.output.action.recovery.kind = "identity"
 
 wam.normalization.state.kind = "min_max"
-wam.normalization.state.clip = true
+wam.normalization.state.clip = false
+wam.normalization.state.output_clamp = [-5.0, 5.0]
 wam.normalization.action.kind = "min_max"
-wam.normalization.action.clip = true
-wam.normalization.epsilon = 1e-6
+wam.normalization.action.clip = false
+wam.normalization.epsilon = 1e-8
 
 ```
 
 `wam.input.image.roles` 是有序 view 记录的唯一索引；每个 role 的 transform 使用 role 命名的子 key 表达，因此 count 和顺序直接由该数组推导，不再保存 `image.count` 或 `image.0.role`。role 名称必须满足冻结后的字符规则，loader 必须拒绝重复或缺少对应 transform 的条目。
+
+FastWAM 网络内部 RMS/group normalization 的 `fastwam.norm_eps=1e-6` 是 architecture metadata，和上面的 policy normalization epsilon 语义不同。converter、artifact loader 和 engine 不得用其中一个替代另一个；Gate B 曾通过该错误绑定定位到 video K/V 首个数值分歧。
 
 RoboTwin FastWAM profile 可以使用：
 
@@ -580,17 +581,18 @@ wam.output.action.recovery.reference_state_indices = [
 ]
 ```
 
-这里 `reference_state_indices[d] >= 0` 表示反归一化后的 action 第 `d` 维需要加上 `raw_state[index]`，`-1` 表示保持绝对值。不得再额外保存一份表达相同信息的 `delta_mask`。上述 key 拼写仍在 Gate B 冻结，但恢复种类、单一索引映射和处理所有权已经确定。
+这里 `reference_state_indices[d] >= 0` 表示反归一化后的 action 第 `d` 维需要加上 `raw_state[index]`，`-1` 表示保持绝对值。不得再额外保存一份表达相同信息的 `delta_mask`。Gate B 已冻结上述 key、恢复种类、单一索引映射和处理所有权。
 
-上述 key 已作为 Slice 2 的内部 development draft 实现，用于 loader/validator 和合成 metadata fixture；它们仍不构成 Gate B 后的稳定 artifact schema、Proto 或公开 ABI。Gate B 根据 GWP/FastWAM 两条真实纵向路径调整后才冻结，现有 development artifact 必须允许重新转换。不能把完整行为压缩为一个 `environment=robotwin` 字段。
+Slice 2 development artifact 必须按 Gate B schema 重新转换；converter/loader/Proto 使用同一份已冻结字段语义。不能把完整行为压缩为一个 `environment=robotwin` 字段。
 
 ### 6.2 Normalization tensor
 
 统计量继续作为 F32 tensor 保存，不放入运行时外部 JSON。0.5 至少支持：
 
 - `z_score`：mean/std；
-- `min_max` 或 quantile min/max：q01/q99；
+- `min_max` 或 quantile：lower/upper；quantile 的 lower/upper 可以来自训练统计的 q01/q99；
 - 可选逐维 normalization mask；
+- 可选 normalization 后的显式 output clamp；它不同于 normalized-space 的 bool clip；
 - 当 checkpoint 确实使用时支持逐时间步统计。
 
 建议使用稳定通用名称：
@@ -598,18 +600,20 @@ wam.output.action.recovery.reference_state_indices = [
 ```text
 wam.norm.state.mean
 wam.norm.state.std
-wam.norm.state.q01
-wam.norm.state.q99
+wam.norm.state.lower
+wam.norm.state.upper
 wam.norm.action.mean
 wam.norm.action.std
-wam.norm.action.q01
-wam.norm.action.q99
+wam.norm.action.lower
+wam.norm.action.upper
 wam.norm.action.mask
 ```
 
 模型私有旧名称可以在 artifact schema 迁移期读取，但 converter 只写新名称。加载时必须校验统计量 shape 与 `real_dim`/`model_dim` 的关系，缺失统计量不能静默退化为 identity。
 
-Slice 2 draft 暂按 `[model_dim]` 校验 state/action statistics 和可选 mask，以覆盖当前 GWP padded statistics；policy ops 只在对应有效维度消费它们。该选择仍需使用 FastWAM 真实 checkpoint 在 Gate B 复核，因此第 17.2 节的统一 shape/mask 规则仍未关闭。统计量必须是 artifact 内 F32 tensor；`z_score` 必须提供 mean/std，`min_max` 和 `quantile` 必须提供 q01/q99，`none` 不允许携带统计量。
+Gate B 已用 GWP05 32D padded quantile、GWP05 RoboTwin 14D z-score 和 FastWAM LIBERO 8D/7D min-max 三条真实 artifact 复核：state/action statistics 和可选 mask 统一使用 `[model_dim]`，policy ops 只消费相应有效维度。统计量必须是 artifact 内 F32 tensor；`z_score` 必须提供 mean/std，`min_max` 和 `quantile` 必须提供 lower/upper，`none` 不允许携带统计量。loader 迁移期可读取旧 q01/q99 tensor，但新 converter 只写 lower/upper，且同一 domain 混用两组名称必须拒绝。
+
+`output_clamp_lower/output_clamp_upper` 仅在 checkpoint 的 reference processing 明确要求时成对出现。state 在 normalization 后执行；action 对 normalized model output 执行，再进入 bool clip 和 unnormalization。FastWAM LIBERO state 使用 `[-5,5]`，action 不使用 output clamp；该字段不能由 `clip=true` 或模型内部 norm epsilon 推导。
 
 ### 6.3 图像角色与组合
 
@@ -1090,7 +1094,7 @@ class ActionChunkExecutor:
 
 ## 11. Serving 和协议改造
 
-0.5 的远程 eval wire contract 冻结为：WebSocket binary frame 承载 Protobuf payload；一条 WebSocket 连接拥有一个 model session；同一连接/session 内所有操作按接收顺序串行执行。PolicySpec 子 message 的最终字段号仍在 Gate B 冻结，但 transport、envelope、连接生命周期和并发语义不再保留多套候选方案。
+0.5 的远程 eval wire contract 冻结为：WebSocket binary frame 承载 Protobuf payload；一条 WebSocket 连接拥有一个 model session；同一连接/session 内所有操作按接收顺序串行执行。Gate B 已冻结 PolicySpec 子 message 字段号、transport、envelope、连接生命周期和并发语义。
 
 ### 11.1 Wire transport 和连接生命周期
 
@@ -1510,6 +1514,10 @@ scripts/
 - 核对公共 `policy_io` 函数确实被两个模型复用；仅一个模型使用的步骤退回对应 architecture 目录。
 - 根据第二种架构暴露的问题调整内部 draft；审查通过后才冻结 0.5 PolicySpec、artifact schema、Proto 字段和主要公共接口。
 
+Gate B 首个纵向 profile 已冻结为 `fastwam_libero_2cam224_minmax`：两路命名视图、224x448 canvas、8D state、外部 `[T,4096]` embedding、`[32,7]` action 和显式/随机 action noise。目标 GGUF 包含 1741 个 tensor，公开 CUDA/BF16 `Model/Session` 输出与 donor C++ 逐 bit 相同；相对独立 PyTorch reference 的 MAE 为 `0.000901506`，最大绝对误差为 `0.00549316`，通过 `1e-3/1e-2` 门限。
+
+donor 的部分 video K/V 和最后两个 velocity 中间 tensor 未通过其更严格的逐层阈值，但 donor 自身的最终 action 通过，且 0.5 与 donor 最终 action 完全相同。该差异冻结为 donor BF16/CUDA 与 PyTorch reference 的已知数值边界，不属于框架迁移回归；后续 kernel/依赖升级必须重新跑同一 fixture，不能据此放宽最终 action 门限。
+
 ### Phase 4：冻结 schema、工具和公共协议
 
 - 冻结 PolicySpec GGUF key、enum、必填字段和字段间约束，并实现正式 reader/validator。
@@ -1591,6 +1599,7 @@ scripts/
 - environment/PolicySpec compatibility 的权威所有者是 server：三个 `run_*_server.py` 分别提供 environment id/contract，共享 server core 执行同一 checker。client 只负责 adaptation 和实际 payload validation；C++ runtime/model/policy 层仍不包含环境分支。
 - `eval/sim/` 保存三个 revision-pinned upstream checkout 的忽略路径，以及每个环境的远程 client/server/setup 入口；`eval/common/` 保存 WebSocket/Protobuf codec、连接状态机、共享 compatibility checker 和 model server core。环境原始 observation/controller adaptation 仍位于 simulator client。
 - 实施采用 framework-first：先建立内部骨架，用 GWP-0.5 RoboTwin 完成第一次无行为审查，再用 FastWAM 首个 profile 验证第二种架构，之后才冻结主要公共 schema 并批量填充其余 profile。
+- Gate B 已确认通用 normalization tensor 与 mask 统一使用 `[model_dim]`；新 artifact 使用 `lower/upper`，旧 q01/q99 仅作为显式迁移 alias。
 
 ### 17.2 仍待确认
 
@@ -1602,10 +1611,9 @@ scripts/
 4. LIBERO 与 LIBERO-X action 的精确 frame、delta 定义和 gripper 正负约定。
 5. RoboTwin 14 维 state/action 每一维的最终字段名称、单位和 controller contract；当前 GWP-0.5 的 mixed delta/absolute 恢复位置、顺序和 reference-state mapping 已冻结，不再属于待确认项。
 6. 三套 FastWAM checkpoint 的准确 action horizon、video frame 数和 inference scheduler 参数，以及哪些 checkpoint/推理入口满足已冻结的 action-only/action-noise 公共契约。
-7. normalization tensor 使用 real dim 还是 model/padded dim，以及 mask 的统一规则。
-8. 各环境 `execute_steps` 的默认配置，以及 0.5 是否确实需要独立 gripper filter；replan/ensemble 暂不作为 0.5 公共组件。
-9. protocol、artifact schema 和 C ABI 的最终版本号；wire transport/session 语义已冻结，不再属于候选项。
-10. LIBERO-X 是否复用 LIBERO GGUF，还是必须使用独立微调 checkpoint 和统计量。
-11. RoboTwin、LIBERO 和 LIBERO-X upstream checkout 的最终 URL、固定 revision、许可证和环境安装版本。
+7. 各环境 `execute_steps` 的默认配置，以及 0.5 是否确实需要独立 gripper filter；replan/ensemble 暂不作为 0.5 公共组件。
+8. protocol、artifact schema 和 C ABI 的最终版本号；wire transport/session 语义已冻结，不再属于候选项。
+9. LIBERO-X 是否复用 LIBERO GGUF，还是必须使用独立微调 checkpoint 和统计量。
+10. RoboTwin、LIBERO 和 LIBERO-X upstream checkout 的最终 URL、固定 revision、许可证和环境安装版本。
 
 这些问题可以改变 profile 内容或环境转换行为，但不能改变本文确定的依赖方向：architecture session 只依赖模型结构和 PolicySpec；公共 policy 函数只依赖 PolicySpec 和 tensor/image 输入；observation/action adaptation 只依赖 simulator/controller 与 PolicySpec，不依赖模型名称；serving compatibility checker 只依赖 environment contract 与 PolicySpec，不进入 C++ model/policy 计算路径。

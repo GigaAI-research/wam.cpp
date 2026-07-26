@@ -11,6 +11,7 @@ import numpy as np
 
 from common.rpc import RpcClient, decode_tensor, encode_tensor
 from common.server import EnvironmentContract, WamServer, check_environment
+from common.language import PreparedLanguage
 
 
 def metadata():
@@ -57,10 +58,16 @@ def metadata():
     }
 
 
-class FakeTokenizer:
-    def __call__(self, _text, **kwargs):
-        size = kwargs["max_length"]
-        return {"input_ids": [1] * size, "attention_mask": [1] * size}
+class FakeLanguageProvider:
+    def __init__(self, external=False): self.external = external
+
+    def prepare(self, _instruction):
+        if self.external:
+            return PreparedLanguage(
+                np.zeros((4, 8), np.uint16), np.ones(4, np.int32),
+                preprocess_milliseconds=0.5, model_milliseconds=2.0)
+        return PreparedLanguage(np.ones(4, np.int32), np.ones(4, np.int32),
+                                preprocess_milliseconds=0.5)
 
 
 class FakeSession:
@@ -69,7 +76,11 @@ class FakeSession:
 
     def predict(self, images, state, token_ids, attention_mask, noise):
         assert len(images) == 3 and state.shape == (14,)
-        assert token_ids.shape == attention_mask.shape == (4,)
+        if self.owner.metadata["language_mode"] == "external_embedding":
+            assert token_ids.shape == (4, 8) and token_ids.dtype == np.uint16
+            assert attention_mask.shape == (4,)
+        else:
+            assert token_ids.shape == attention_mask.shape == (4,)
         assert noise is None
         action = np.full((3, 14), self.identifier + self.resets, np.float32)
         names = ("preprocess_milliseconds", "model_milliseconds",
@@ -87,8 +98,11 @@ class FakeSession:
 
 
 class FakeModel:
-    def __init__(self):
+    def __init__(self, external=False):
         self.metadata, self.created, self.closed = metadata(), 0, []
+        if external:
+            self.metadata["language_mode"] = "external_embedding"
+            self.metadata["policy_spec"]["language"]["input_mode"] = "embedding"
 
     def create_session(self, _seed):
         self.created += 1
@@ -103,10 +117,11 @@ def contract():
 
 
 @asynccontextmanager
-async def running_server(descriptor):
+async def running_server(descriptor, external=False):
     from websockets.asyncio.server import serve
-    model = FakeModel()
-    app = WamServer(model, FakeTokenizer(), descriptor, contract(), "127.0.0.1", 0)
+    model = FakeModel(external)
+    app = WamServer(model, FakeLanguageProvider(external), descriptor,
+                    contract(), "127.0.0.1", 0)
     async with serve(app.handler, "127.0.0.1", 0, compression=None) as server:
         yield model, f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", app.types
 
@@ -191,6 +206,18 @@ async def run(descriptor):
             assert response.error.fatal and response.error.field == "frame"
         await asyncio.sleep(0.01)
     assert sorted(model.closed) == list(range(1, model.created + 1))
+
+    async with running_server(descriptor, external=True) as (_, url, types):
+        async with connect(url) as socket:
+            await exchange(socket, hello(types), types["ServerEnvelope"])
+            response = await exchange(
+                socket, predict(types, 1), types["ServerEnvelope"])
+            stats = response.predict.prediction.stats
+            assert stats.preprocess_milliseconds == 0.5
+            assert stats.model_text_milliseconds == 2.0
+            assert stats.model_milliseconds == 2.0
+            assert stats.total_milliseconds == 2.5
+            assert stats.model_timings[0].name == "language_encoder"
 
 
 def main():

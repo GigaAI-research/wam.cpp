@@ -1,0 +1,98 @@
+{
+  "format": "wam-policy-spec-profile-v1",
+  "artifact_schema_version": 2,
+  "identity": {
+    "profile": "fastwam_libero_2cam224_minmax",
+    "checkpoint_revision": "fastwam_release/libero_uncond_2cam224",
+    "training_dataset": "libero_spatial_object_goal_10_no_noops",
+    "embodiment": "libero_panda"
+  },
+  "images": {
+    "roles": ["scene", "wrist"],
+    "views": {
+      "scene": {
+        "target_height": 224,
+        "target_width": 224,
+        "resize_mode": "cover_center_crop",
+        "interpolation": "bilinear",
+        "antialias": true,
+        "rect": [0, 0, 224, 224]
+      },
+      "wrist": {
+        "target_height": 224,
+        "target_width": 224,
+        "resize_mode": "cover_center_crop",
+        "interpolation": "bilinear",
+        "antialias": true,
+        "rect": [224, 0, 224, 224]
+      }
+    },
+    "composition": {
+      "kind": "canvas",
+      "height": 224,
+      "width": 448
+    },
+    "color_space": "rgb",
+    "pixel_range": "minus_one_to_one",
+    "tensor_layout": "chw"
+  },
+  "state": {
+    "real_dim": 8,
+    "model_dim": 8,
+    "pad_value": 0.0,
+    "fields": [
+      "eef.position.x",
+      "eef.position.y",
+      "eef.position.z",
+      "eef.rotation.axis_angle.x",
+      "eef.rotation.axis_angle.y",
+      "eef.rotation.axis_angle.z",
+      "gripper.left",
+      "gripper.right"
+    ]
+  },
+  "language": {
+    "input_mode": "embedding",
+    "prompt_template": "A video recorded from a robot's point of view executing the following instruction: {task}",
+    "tokenizer_family": "umt5",
+    "tokenizer_revision": "Wan-AI/Wan2.1-T2V-1.3B",
+    "max_tokens": 128,
+    "text_encoder_in_artifact": false,
+    "padding_side": "right",
+    "truncation_side": "right",
+    "attention_mask_required": true,
+    "special_token_ids": []
+  },
+  "action": {
+    "horizon": 32,
+    "real_dim": 7,
+    "model_dim": 7,
+    "fields": [
+      "eef.delta.position.x",
+      "eef.delta.position.y",
+      "eef.delta.position.z",
+      "eef.delta.rotation.axis_angle.x",
+      "eef.delta.rotation.axis_angle.y",
+      "eef.delta.rotation.axis_angle.z",
+      "gripper.command"
+    ],
+    "representation": "eef_delta_pose",
+    "frame": "robot_base",
+    "gripper": "continuous",
+    "recovery": {
+      "kind": "identity"
+    }
+  },
+  "normalization": {
+    "state": {
+      "kind": "min_max",
+      "clip": false,
+      "output_clamp": [-5.0, 5.0]
+    },
+    "action": {
+      "kind": "min_max",
+      "clip": false
+    },
+    "epsilon": 1e-08
+  }
+}

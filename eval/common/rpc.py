@@ -32,8 +32,15 @@ def load_types(descriptor):
         if len(deferred) == len(pending):
             raise ValueError("protobuf descriptor dependencies cannot be resolved")
         pending = deferred
-    return {name: message_factory.GetMessageClass(
-        pool.FindMessageTypeByName(f"{PACKAGE}.{name}")) for name in MESSAGE_NAMES}
+    descriptors = {
+        name: pool.FindMessageTypeByName(f"{PACKAGE}.{name}")
+        for name in MESSAGE_NAMES}
+    if hasattr(message_factory, "GetMessageClass"):
+        return {name: message_factory.GetMessageClass(value)
+                for name, value in descriptors.items()}
+    factory = message_factory.MessageFactory(pool)
+    return {name: factory.GetPrototype(value)
+            for name, value in descriptors.items()}
 
 
 def encode_tensor(message, value, dtype):
