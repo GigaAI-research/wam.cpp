@@ -1,22 +1,85 @@
 #pragma once
 
+#include "models/gwp05/artifact.h"
+#include "models/gwp05/inputs.h"
+
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 
 namespace wam::internal::gwp05 {
-
-struct ArtifactContract;
-struct PreparedInputs;
-struct CoreAction;
 
 namespace engine {
 
 class Engine;
-struct EngineOptions;
+class EngineSession;
 
-std::unique_ptr<Engine> create_engine(const ArtifactContract & artifact,
-                                      const EngineOptions & options);
-CoreAction predict(Engine & engine, const PreparedInputs & inputs);
-void reset(Engine & engine);
+struct EngineDeleter {
+    void operator()(Engine * engine) const noexcept;
+};
+
+using EnginePtr = std::unique_ptr<Engine, EngineDeleter>;
+
+struct EngineSessionDeleter {
+    void operator()(EngineSession * session) const noexcept;
+};
+
+using EngineSessionPtr =
+    std::unique_ptr<EngineSession, EngineSessionDeleter>;
+
+enum class ExecutionProfile {
+    reference,
+    latency,
+};
+
+struct KernelDispatch {
+    ExecutionProfile profile = ExecutionProfile::reference;
+    bool native_bf16 = false;
+    bool bf16_output_gemm = false;
+    bool f32_accumulation = true;
+    bool bf16_hidden_and_kv = false;
+    bool bf16_vae = false;
+    bool packed_qkv = false;
+    bool cuda_graphs = false;
+    bool single_token_timestep = false;
+    bool unrolled_denoise = false;
+};
+
+struct EngineOptions {
+    Backend backend = Backend::automatic;
+    ComputePrecision compute_precision = ComputePrecision::automatic;
+    int device_index = 0;
+    std::size_t prompt_cache_capacity = 0;
+    LanguageRuntimeMode language_mode = LanguageRuntimeMode::tokens;
+    std::optional<FixedPrompt> fixed_prompt;
+};
+
+struct EngineSessionOptions {
+    bool enable_prefix_cache = true;
+};
+
+struct EngineInfo {
+    Backend backend = Backend::automatic;
+    ComputePrecision compute_precision = ComputePrecision::unknown;
+    std::uint64_t resident_device_bytes = 0;
+    std::uint64_t peak_component_device_bytes = 0;
+    std::vector<RuntimeComponentInfo> runtime_components;
+};
+
+KernelDispatch resolve_kernel_dispatch(
+    ComputePrecision precision, Backend backend,
+    const std::string & conversion_policy);
+const char * execution_profile_name(ExecutionProfile profile) noexcept;
+
+EnginePtr create_engine(const ArtifactContract & artifact,
+                        const EngineOptions & options);
+EngineSessionPtr create_engine_session(
+    Engine & engine, const EngineSessionOptions & options);
+CoreAction predict(EngineSession & session, const PreparedInputs & inputs);
+void reset(EngineSession & session);
+const EngineInfo & engine_info(const Engine & engine) noexcept;
 
 } // namespace engine
 } // namespace wam::internal::gwp05

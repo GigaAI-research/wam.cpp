@@ -28,6 +28,8 @@
 
 GWP-0.5 的 LIBERO/LIBERO-X 权重完成后，首先确认其视觉图结构是原生两视图、动态视图还是其他明确结构，并冻结对应的 VAE/composition geometry。converter 不能只根据 `num_views=2` 猜测模型语义。FastWAM 三个环境的现有权重需要在 Phase 0 记录准确 checkpoint revision、模型变体、输入输出契约和 normalization statistics。
 
+Slice 4A 的真实资产审计确认：用于迁移旧 C++ engine 的 donor GGUF 是 32 维 padded state/action、quantile normalization 和上下各半的三视图 canvas；当前 RoboTwin `checkpoint_epoch_9_step_100000/transformer_ema` 则是 14 维 state/action、z-score normalization，现有 Python reference 使用 scene 上方 2/3、左右 wrist 下方各 1/2 的 canvas。两者共享 GWP05 architecture，但不是同一个 policy profile。旧 GGUF 没有足够 provenance 证明 training dataset，legacy migration 不得将它命名为 RoboTwin；当前 RoboTwin checkpoint 必须转换成带完整 PolicySpec 的新 GGUF。
+
 0.5 不要求实现 `pi0`、`pi0.5` 或其他 VLA，但本次设计不得把模型核心重新绑定到具体环境，避免后续接入这些模型时再次重构公共框架。
 
 ## 3. 关键设计结论
@@ -92,7 +94,7 @@ runtime 返回的 action 定义为：
 
 真实 action 恢复位于一次完整的 `SessionImpl::predict()` 调用内，但不属于 architecture 私有神经网络 graph。具体 session 在 engine 产生 normalized/model-space action 后调用 PolicySpec 驱动的无状态 action 函数，并在返回 `Prediction` 前完成恢复。恢复函数可以读取本次请求中尚未 normalization/padding 的 raw state；server 和 simulator client 均不得补做这一步。该阶段计入 `Stats.postprocess_milliseconds`，不计入 action denoise 的 `model_decode_milliseconds`。
 
-当前 GWP-0.5 RoboTwin checkpoint 的恢复语义冻结为：先把 `[horizon, model_action_dim]` 裁剪到 `real_action_dim=14`，再使用 checkpoint action statistics 反归一化，最后只对左右臂的 12 个关节维加上同一次 `predict()` 输入的 raw state；两个 gripper 维保持反归一化后的绝对值。chunk 中所有 timestep 都引用同一份请求时刻 raw state，与现有 Python reference 行为一致。
+当前 GWP-0.5 RoboTwin checkpoint 的恢复语义冻结为：先把 `[horizon, model_action_dim]` 裁剪到 `real_action_dim=14`（当前 14D checkpoint 中该步是 shape-preserving；旧 32D donor 会真实裁剪），再使用各自 checkpoint action statistics 反归一化，最后只对左右臂的 12 个关节维加上同一次 `predict()` 输入的 raw state；两个 gripper 维保持反归一化后的绝对值。chunk 中所有 timestep 都引用同一份请求时刻 raw state，与现有 Python reference 行为一致。
 
 一次 `predict()` 始终返回完整的 `PolicyActionChunk`，公共 shape 为 `[horizon, real_action_dim]`。`horizon` 是 checkpoint 输出契约；每次实际执行多少步由 simulator side 的 ActionChunkExecutor 决定，更复杂的 replan/ensemble 属于后续控制策略，均不能改变 runtime 输出边界。
 
@@ -277,13 +279,13 @@ environment/profile compatibility 的权威判断只在 server 侧执行，clien
 
 `src/policy/image_ops.*` 不能依赖 `GgufReader` 或 GGUF key 名称。GGUF 解析、enum/string 转换和 metadata 错误定位属于 PolicySpec loader；image ops 只执行已经验证的 `ImageSpec`。这样同一 CPU reference 可以直接从测试 fixture 构造 `ImageSpec`，也可以被未来其他 artifact/transport 复用，且不会在每次 `predict()` 中重复解析 metadata。
 
-action decode 函数显式接收 normalized/model-space action、同一次请求的 raw state、`ActionSpec` 和 action statistics。具体 session 必须保留 raw state，并另外产生供模型使用的 normalized/padded state；恢复阶段不能错误地使用 normalized 或 padded state。默认顺序为 `trim real dimension -> unnormalize -> recover representation`，normalization clip 的精确位置在 normalization 公式冻结时统一确定。
+action decode 函数显式接收 normalized/model-space action、同一次请求的 raw state、`ActionSpec` 和 action statistics。具体 session 必须保留 raw state，并另外产生供模型使用的 normalized/padded state；恢复阶段不能错误地使用 normalized 或 padded state。冻结顺序为 `trim real dimension -> optional clip -> unnormalize -> recover representation`。`min_max`/`quantile` 的 clip 区间固定为 normalized space `[-1,1]`：state 在 normalization 后裁剪，action 在 unnormalize 前裁剪。`z_score` 没有可由现有 schema 推导的 clip 上下界，因此 `z_score + clip=true` 必须在 artifact load 时拒绝，不能静默忽略；当前 GWP05 RoboTwin z-score profile 使用 `clip=false`，与 Python reference 的 `(x-mean)/std` 和 `x*std+mean` 一致。
 
 语言处理仍位于 serving/eval 与 architecture session 的输入边界：
 
 - `CanonicalObservation` 的 wire contract 保留原始 instruction；request bridge 可以应用 PolicySpec prompt template，并只使用当前 server/model 进程已经具备且经过该 profile 验证的 language path 构造 `wam::Inputs`；
 - C++ session 只验证 token/embedding 模式、shape 和 mask；token 输入由 architecture session 的 artifact 内部 text encoder 处理，支持的 embedding 输入可以显式旁路该 encoder。0.5 不实现通用 C++ tokenizer。
-- 0.5 不实现通用 external-tokenizer manager，也不规定外部 tokenizer 的 CLI 路径、自动下载、revision 解析、文件校验或跨容器挂载方式。若某个纵向 profile 无法在不依赖该未决机制的情况下构造合法 language input，server 必须在启动时返回 `Unsupported`，不能在请求期临时猜测。
+- 0.5 不实现通用 external-tokenizer manager、自动下载、family/revision 路径解析或跨 profile 生命周期。已验证的纵向 profile 可以由 environment server 入口要求显式、本地、server-owned tokenizer 路径；client 不能提供该路径。无法通过这种已验证部署构造合法 language input 的 profile 必须在启动时返回 `Unsupported`，不能在请求期临时猜测。
 
 transport 把 WebSocket binary frame 中的 Protobuf/JPEG/PNG payload 解码为 `ImageView`，但不得执行 checkpoint 相关的 resize、composition 或 normalization。
 
@@ -299,6 +301,14 @@ transport 把 WebSocket binary frame 中的 Protobuf/JPEG/PNG payload 解码为 
 - 管理 Model/Session 生命周期、统一错误、capability 和统计信息。
 - 将公共 `Inputs` 交给 policy session，不理解环境名称；environment contract 只存在于 C++ runtime 之外的 server 启动/兼容层。
 
+0.5 的 opaque handle 生命周期固定如下：
+
+- `Model` 拥有 architecture `ModelImpl` 和不可变共享资源，`Session` 拥有 `SessionImpl`，并借用其创建者 `Model`。
+- `model_free()` 表示释放 model handle。若仍有 session，禁止再通过该 handle 创建 session 或查询 `model_info()`，但已有 session 必须继续可用；底层 model 资源延迟到最后一个 session 被释放时销毁。
+- `session_free()` 先销毁 session 私有 cache/RNG/workspace，再减少 model 的活动 session 计数；当 model handle 已释放且计数归零时完成 model 销毁。两个 free 函数对空指针均为 no-op，但每个非空 handle 仍只能释放一次。
+- `session_reset()` 不允许异常穿过 Status 边界：`wam::Error` 保留 code/details，其他异常映射为 `Internal`；`model_load()`、`session_create()`、`predict()` 和 `model_info()` 继续使用 `wam::Error` 报错。
+- Slice 1 的 handle bookkeeping 不承诺并发 create/free；调用方需要串行管理同一 model/session 的生命周期。并发能力以后由 `Capabilities` 和对应 architecture 的明确测试开放，不能从多 session 支持反推线程安全。
+
 ### 5.6 Architecture Model/Session
 
 每个 architecture 继续通过现有 `ModelImpl`/`SessionImpl` 边界实现完整的一次预测：
@@ -307,6 +317,88 @@ transport 把 WebSocket binary frame 中的 Protobuf/JPEG/PNG payload 解码为 
 - `fastwam`：Wan VAE、text encoder、proprio encoder、video/action experts、MoT、action scheduler。
 
 `SessionImpl::predict()` 负责组织“公共输入函数 -> architecture 私有计算 -> 公共 action decode”的顺序，并直接返回 `Prediction`。模型可以定义自己的内部 prepared tensor 和 normalized action 类型，但这些类型不进入公共 runtime 接口，也不要求其他 architecture 复用。session 不读取仿真 observation 字典，不处理 `env.step()`，也不根据 profile/environment 名称做分支。
+
+#### 5.6.1 Engine facade 和统一文件职责
+
+每个 architecture 在自己的目录中实现相同形状的私有 engine facade：
+
+```cpp
+create_engine(artifact, options)
+create_engine_session(engine, session_options)
+predict(engine_session, prepared_inputs)
+reset(engine_session)
+```
+
+facade 的函数角色和生命周期一致：model-level engine 拥有共享 backend/weights，engine session 拥有 cache/graph/workspace，具体 architecture `SessionImpl` 拥有公共请求边界所需的 RNG。`ArtifactContract`、`PreparedInputs`、`CoreAction`、engine/session options 和具体 engine 类型均属于对应 architecture，不建立跨模型 engine-session 接口。0.5 不为 language encoder、observation encoder、backbone 或 action path 建立跨模型虚基类，也不要求不同模型共享中间 tensor。公共推理多态仍然只有 `ModelImpl`/`SessionImpl`。
+
+engine 的目标目录统一为：
+
+```text
+src/models/<architecture>/engine/
+  engine.h
+  engine.cpp
+  engine_internal.h
+  weights.cpp
+  runtime.cpp
+  language_encoder.cpp
+  observation_encoder.cpp
+  backbone.cpp
+  action.cpp
+  cache.cpp                  # 可选，只有真实 cache 生命周期时存在
+```
+
+文件职责固定如下：
+
+| 文件 | 职责 |
+| --- | --- |
+| `engine.h` | 最小私有 facade 声明，不暴露 graph、backend 或具体网络组件 |
+| `engine.cpp` | create/predict/reset 编排、阶段顺序和错误清理，不实现大段网络 block |
+| `engine_internal.h` | architecture 私有 geometry、weights、graph、cache 和中间 tensor 类型 |
+| `weights.cpp` | GGUF tensor 绑定、shape/dtype 校验、component residency，不构建完整推理流程 |
+| `runtime.cpp` | backend/context/buffer、graph allocation/execution 和 tensor 传输 |
+| `language_encoder.cpp` | language input 到主干条件；tokens 模式执行对应语言路径，external embedding 模式消费已验证 embedding |
+| `observation_encoder.cpp` | 已完成公共 policy preprocessing 的 image/state/proprio 到模型内部 latent/token；不读取环境原始字段 |
+| `backbone.cpp` | architecture 的主要融合网络和 block 数学，如 MoT、Wan/DiT 或 PaliGemma/Gemma joint layers |
+| `action.cpp` | action/noise/time 条件、action input/output projection、action head，以及迭代或直接 action generation |
+| `cache.cpp` | 可选的 prefix/KV/graph cache 构建、命中、reset 和复用，不承担无 cache 模型的占位职责 |
+
+T5、VAE、MoT、PaliGemma、Gemma Expert 和 ActionDiT 等名字继续保留在具体类型、函数、权重前缀和测试 stage 中；统一的是外层职责，不是抹去模型结构。不存在某一职责时不创建空 `.cpp`。当单个职责包含多个可独立验证且拥有独立生命周期的 graph 时，可以在该 architecture 内继续拆分私有实现，但不得因此扩大 engine facade 或建立通用 processor/plugin 层。
+
+对应关系如下：
+
+| 统一职责 | GWP05 | FastWAM | pi0/pi0.5 | OpenVLA 类模型 |
+| --- | --- | --- | --- | --- |
+| language | T5 encoder | Wan T5 encoder | language token embedding/path | LLM language path |
+| observation | image VAE、state representation | video VAE、proprio | vision tower 和 multimodal projector | vision tower |
+| backbone | MoT joint blocks | world/video backbone 和 joint fusion | PaliGemma 与 Gemma Expert joint layers | VLM backbone |
+| action | action condition、velocity head、flow denoise | ActionDiT、action head、sampler | state/noise/time projection、flow sampling | action token/head decode |
+| cache | visual/text prefix cache | 由实际 checkpoint 路径决定 | VLM prefix KV cache | 可选或不存在 |
+
+pi0/pi0.5 的 PaliGemma 同时融合视觉和语言，不能为了文件名一致而把完整 PaliGemma 塞进 `language_encoder.cpp`；其融合层属于 `backbone.cpp`。同理，FastWAM 的 ActionDiT 可以保留自己的具体实现名，但通过 `action.cpp` 所属职责接入完整 engine。
+
+#### 5.6.2 Engine 阶段 timing
+
+`Stats` 的字段语义按计算阶段统一，而不是按具体文件机械计时：
+
+- `model_vision_milliseconds`：`observation_encoder` 中的 VAE/vision tower 等视觉网络；公共 resize/composition/normalization 仍计入 preprocess；
+- `model_text_milliseconds`：实际执行的 T5、language embedding/encoder 等语言路径；外部 embedding 或 cache 命中未执行时可以为零；
+- `model_prefill_milliseconds`：为当前请求建立可复用条件表示、VLM/MoT prefix 或 prefix cache 的计算；没有独立 prefill 的模型可以为零；
+- `model_decode_milliseconds`：action generation 阶段；diffusion/flow 模型包括全部 denoise step，直接生成模型只记录真实 action generation 工作或保持未采集，不得伪装成 denoise；
+- `model_milliseconds`：从 architecture engine 输入就绪到返回 model-space action 的唯一总耗时，包含上述实际执行的子阶段；
+- `model_timings`：记录 `vae`、`t5`、`prefix_cache_build`、`backbone`、`action_step_00` 等 architecture 私有细分，条目名称保留真实组件语义，不作为第二套总计。
+
+cache 命中、external embedding 和没有某一阶段的模型允许对应字段为零；不能用上一次请求的耗时填充本次请求。阶段统计由 engine 收集，公共 preprocess/postprocess/total 由 session 边界补齐。
+
+#### 5.6.3 Engine 测试边界
+
+- artifact contract test 只验证 metadata、tensor descriptor 和 conversion policy，不分配模型 backend，也不声称数值推理可用；
+- weights/runtime structural test 验证完整 tensor 绑定、shape/dtype、backend 初始化、失败清理和 CPU-only build；
+- component parity test 分别验证 language、observation、backbone、action 和可选 cache 的中间 tensor；
+- end-to-end engine parity 使用固定 prepared inputs 和显式 action noise，只比较 model-space action，不执行公共 trim/unnormalize/recovery；
+- reset/repeat test 验证 cache 清理、显式 noise 确定性、输入不被修改和连续请求隔离；
+- test-only stage observer/dump hook 必须通过测试构建开关或私有接口提供，不能进入公共 API，也不能改变正常 graph 的算子顺序。
+
+默认 CI 使用小型 contract/structural fixture，并在没有内部 GGUF/replay 时明确跳过外部数值测试。真实 checkpoint parity 通过 CMake 外部路径启用，逐阶段使用冻结容差；最终 action 接近不能掩盖上游中间 tensor 偏差。
 
 ### 5.7 ActionChunkExecutor
 
@@ -367,7 +459,7 @@ Transport 不进行图像/state/action 数学处理。0.5 固定使用 WebSocket
 
 ## 6. PolicySpec 设计
 
-### 6.1 建议的 GGUF metadata
+### 6.1 Slice 2 development-draft GGUF metadata
 
 通用字段使用 `wam.*` 前缀，模型 geometry 使用 architecture 前缀：
 
@@ -411,6 +503,17 @@ wam.input.state.fields = [
   "gripper.left", "gripper.right"
 ]
 
+wam.input.language.input_mode = "tokens"
+wam.input.language.prompt_template = "Act: {task}"
+wam.input.language.tokenizer_family = "..."       # provenance only
+wam.input.language.tokenizer_revision = "..."     # provenance only
+wam.input.language.max_tokens = 512
+wam.input.language.text_encoder_in_artifact = true
+wam.input.language.padding_side = "right"
+wam.input.language.truncation_side = "right"
+wam.input.language.attention_mask_required = true
+wam.input.language.special_token_ids = [0, 1]
+
 wam.output.action.horizon = 32
 wam.output.action.real_dim = 7
 wam.output.action.model_dim = 7
@@ -425,7 +528,9 @@ wam.output.action.gripper = "continuous"
 wam.output.action.recovery.kind = "identity"
 
 wam.normalization.state.kind = "min_max"
+wam.normalization.state.clip = true
 wam.normalization.action.kind = "min_max"
+wam.normalization.action.clip = true
 wam.normalization.epsilon = 1e-6
 
 ```
@@ -477,7 +582,7 @@ wam.output.action.recovery.reference_state_indices = [
 
 这里 `reference_state_indices[d] >= 0` 表示反归一化后的 action 第 `d` 维需要加上 `raw_state[index]`，`-1` 表示保持绝对值。不得再额外保存一份表达相同信息的 `delta_mask`。上述 key 拼写仍在 Gate B 冻结，但恢复种类、单一索引映射和处理所有权已经确定。
 
-上述名称是 0.5 设计建议，最终编码前需要冻结字段名和枚举值。不能把完整行为压缩为一个 `environment=robotwin` 字段。
+上述 key 已作为 Slice 2 的内部 development draft 实现，用于 loader/validator 和合成 metadata fixture；它们仍不构成 Gate B 后的稳定 artifact schema、Proto 或公开 ABI。Gate B 根据 GWP/FastWAM 两条真实纵向路径调整后才冻结，现有 development artifact 必须允许重新转换。不能把完整行为压缩为一个 `environment=robotwin` 字段。
 
 ### 6.2 Normalization tensor
 
@@ -504,6 +609,8 @@ wam.norm.action.mask
 
 模型私有旧名称可以在 artifact schema 迁移期读取，但 converter 只写新名称。加载时必须校验统计量 shape 与 `real_dim`/`model_dim` 的关系，缺失统计量不能静默退化为 identity。
 
+Slice 2 draft 暂按 `[model_dim]` 校验 state/action statistics 和可选 mask，以覆盖当前 GWP padded statistics；policy ops 只在对应有效维度消费它们。该选择仍需使用 FastWAM 真实 checkpoint 在 Gate B 复核，因此第 17.2 节的统一 shape/mask 规则仍未关闭。统计量必须是 artifact 内 F32 tensor；`z_score` 必须提供 mean/std，`min_max` 和 `quantile` 必须提供 q01/q99，`none` 不允许携带统计量。
+
 ### 6.3 图像角色与组合
 
 公共输入继续使用命名图像。请求顺序不决定模型顺序，具体 session 调用公共 image 函数，按 `PolicySpec.image.roles` 查找和排序。GGUF 保存 checkpoint 要求的图像处理配置，而不是运行时图像数据；同一个环境的 GWP-0.5 和 FastWAM checkpoint 可以声明不同 transform，adapter 仍然只提交相同的 canonical image roles。
@@ -526,7 +633,7 @@ GGUF metadata
 | `stretch` | 宽、高独立缩放，直接得到 `target_width x target_height`；FastWAM RoboTwin 使用此模式 |
 | `cover_center_crop` | 使用 `scale=max(target_width/source_width, target_height/source_height)` 等比缩放到完全覆盖目标区域，再做整数中心裁剪；GWP-0.5 现有 RoboTwin 路径以及 FastWAM LIBERO/LIBERO-X 使用此模式 |
 
-`cover_center_crop` 的 resized width/height 使用与 Python `round()` 一致的正数 ties-to-even 规则，中心裁剪的 left/top 使用非负整数 floor offset。interpolation 和 antialias 是 transform 的显式字段；同一 artifact schema 下每个枚举必须对应稳定的 CPU reference 像素语义，不能由当前使用 PIL、torchvision、OpenCV 或 CUDA 自动决定。bilinear 的采样坐标、边界和 antialias 精确行为在 Gate B 前由 Phase 0 fixture 冻结；优化实现必须逐像素对齐该 reference。
+`cover_center_crop` 的 resized width/height 使用与 Python `round()` 一致的正数 ties-to-even 规则，中心裁剪的 left/top 使用非负整数 floor offset。interpolation 和 antialias 是 transform 的显式字段；同一 artifact schema 下每个枚举必须对应稳定的 CPU reference 像素语义，不能由当前使用 PIL、torchvision、OpenCV 或 CUDA 自动决定。Slice 6 已冻结 CPU reference：采样坐标使用 half-pixel center；schema-v2 对越过源图边界的 filter support 做 truncate 并对有效权重重新归一化，从而对齐 PIL/torchvision；bilinear 使用 triangle kernel，downscale 且 `antialias=true` 时按 inverse scale 扩大 kernel；nearest 使用最近中心；bicubic 使用 Catmull-Rom (`a=-0.5`) kernel 并采用相同 antialias 扩展。仅 `read_legacy_policy_spec()` 构造的隔离 migration profile 保留历史 clamp-to-edge 语义，以维持冻结 donor oracle；该兼容模式不能由环境或普通 schema-v2 profile 选择。优化实现必须逐像素对齐各自 reference。
 
 transport 或直接调用边界先把 wire/JPEG/PNG/BGR 等原始表示转换成 canonical RGB `ImageView`。在此基础上，一次公共 policy 图像处理的规范顺序为：
 
@@ -539,6 +646,8 @@ validate/resolve named roles
 ```
 
 `pixel_range` 表示交给模型 engine 的最终数值范围，不表示 RPC payload 的输入编码。0.5 的 GWP-0.5/FastWAM profile 使用 RGB 和 `minus_one_to_one`；以后适配需要 per-channel mean/std 的模型时再基于真实 checkpoint 扩展 image value transform，不能把 mean/std 偷藏在 architecture 分支中。
+
+已审计 legacy GWP05 路径实际使用 `cover_center_crop + bilinear + antialias`；legacy PolicySpec migration 必须据此构造 transform，不能将 donor 行为错误标成 `stretch`。公共 image ops 完成 composite RGB CHW `[-1,1]` 后，GWP 私有 observation encoder 只保留 checkpoint 固有的 2x2 patchify 和 VAE latent 处理。
 
 0.5 不为 `horizontal`、`vertical`、`top_with_two_bottom` 分别编写带环境含义的分支。公共 image 函数只需要两种 composition：
 
@@ -563,7 +672,7 @@ composition 只负责几何组合；模型特有 patchify、VAE latent 编码和
 - text encoder 是否在 artifact 中；
 - padding side、truncation side、special token 和 attention mask 规则。
 
-环境 adapter 只提供原始 instruction，wire request 不携带 tokenizer 路径或 tokenizer 文件。0.5 暂不闭合 GGUF 外部 tokenizer 的部署方案：不定义 family/revision 到本地文件的解析规则，不自动下载，不定义容器挂载参数，也不计算 tokenizer hash。现有 `LanguageSpec.tokenizer_family/tokenizer_revision` 可以在开发期保留为 provenance/draft 字段，但不能作为已经实现的资源解析能力或 0.5 profile 可用性的保证。
+环境 adapter 只提供原始 instruction，wire request 不携带 tokenizer 路径或 tokenizer 文件。0.5 不定义 family/revision 到本地文件的自动解析规则，不自动下载，也不计算 tokenizer hash。GWP05 RoboTwin 的已验证部署由 server CLI 显式传入本地 UMT5 tokenizer 路径；这不是通用资源管理能力。`LanguageSpec.tokenizer_family/tokenizer_revision` 仍主要是 provenance/draft 字段。
 
 0.5 只支持能够由当前 server/model 部署中已经存在的 language path 构造合法 token/embedding 的纵向 profile。具体 profile 使用 artifact 内部能力、已嵌入资源、固定输入或现有已验证集成路径，需要在该 profile 的 fixture 中说明；依赖尚未实现的 external-tokenizer manager 的 profile 必须启动失败。外部 tokenizer 的资源格式、部署参数和生命周期留到后续版本单独设计，不阻塞当前 C++ 框架、图像/state/action 和 RPC 骨架。
 
@@ -715,7 +824,7 @@ src/policy/action_ops.cpp
 
 ### 8.1 Artifact
 
-当前 `src/models/gwp05/artifact.cpp` 已读取 `real_state_dim`、`real_action_dim`、`num_views`、image geometry、action chunk 和 normalization tensor，但显式拒绝 `num_views != 3`。当前 RoboTwin GWP VAE 还包含固定三视图的 mosaic/patchify 语义，不能在 PolicySpec 中错误标记为简单的 `separate`。
+重构前的 GWP artifact loader 同时读取 `real_state_dim`、`real_action_dim`、`num_views`、image geometry、action chunk 和 normalization tensor，并显式拒绝 `num_views != 3`。当前 RoboTwin GWP VAE 还包含固定三视图的 mosaic/patchify 语义，不能在 PolicySpec 中错误标记为简单的 `separate`。
 
 修改：
 
@@ -732,7 +841,7 @@ src/policy/action_ops.cpp
 
 ### 8.2 Inputs 和 semantics
 
-当前 `src/models/gwp05/semantics.cpp` 固定三个相机名称和顺序。
+重构前的 GWP semantics 固定三个相机名称和顺序。
 
 修改：
 
@@ -742,6 +851,12 @@ src/policy/action_ops.cpp
 - 当前 RoboTwin profile 在 action 反归一化后按 `reference_state_indices=[0,1,2,3,4,5,-1,7,8,9,10,11,12,-1]` 加回同一次请求的 raw state；该规则来自 PolicySpec，不在 GWP engine、server 或 RoboTwin client 中硬编码。
 - token 顺序、RoPE、MoT mask、scheduler 和 cache shape 等 GWP 专属语义继续保留在 `gwp05/semantics.*`。
 
+Slice 3 的开发实现已经落实该边界：draft artifact 以 PolicySpec 为通用契约唯一来源，现有 `gwp05.action_dim/real_*_dim/num_views/image_*/action_chunk` 只在出现时作为旧字段交叉校验。没有 draft schema marker 的 artifact 只允许匹配已审计旧 GWP05 三视图、14/32 维、48 horizon、quantile 合同，并从旧 `state_q01/q99`、`action_q01/q99` 构造 profile 为 `legacy-gwp05-dual-arm-32d-quantile`、training dataset 为 `legacy-unknown` 的隔离 PolicySpec；其他 legacy geometry 明确 `Unsupported`。当前 GWP 结构语义仍只接受经过验证的三视图完整 canvas，后续两视图权重不能在没有 fixture 的情况下绕过该限制。
+
+Slice 3 input contract 只接受已经解码的 `rgb_u8` 命名图像、flat little-endian F32 state、与最终 language mode 一致的 token 或 F32/BF16 embedding，以及可选 little-endian F32 `[horizon, model_action_dim]` action noise。PNG/JPEG 解码、resize/composition/normalization、内部 RNG 和 engine tensor 准备尚未实现，不能把 metadata-only input validation 当作完整 preprocessing。GWP metadata-only model 将 `Capabilities.action` 保持为 false，并在 `session_create()` 返回 `Unsupported`；其他 input capability 只说明该 artifact contract 已可描述和校验。
+
+Slice 6 已在不改变上述外部输入 contract 的前提下补齐 compute session 路径：`inputs.cpp` 调用公共 image/state/action-noise ops，GWP engine facade 只接收 prepared composite、model state 和完整 noise；engine 输出 normalized/model-space action 后，`Gwp05SessionImpl` 调用公共 action decode 并使用保留的 raw state 完成一次恢复。engine 不再持有 state/action statistics、raw image role/resize/canvas 逻辑、RNG fallback 或最终 action adapter。
+
 ### 8.3 Model 和 engine
 
 修改：
@@ -750,7 +865,8 @@ src/policy/action_ops.cpp
 - engine 从 geometry 获取真实 view/token 数，不读取环境 profile 名称。
 - 公共 action 输出 shape 使用 PolicySpec 的 horizon 和 real action dim。
 - 保持现有 F32/BF16 路径、cache、scheduler 和已验证数值语义不变。
-- 首先使用现有 RoboTwin GGUF 做无行为重构，证明改造前后 bitwise 或容差内一致，再添加其他 profile。
+- 首先使用 Slice 4A 已审计 legacy 32D F32 GGUF 和 donor manifest 做无行为重构，证明改造前后 bitwise 或容差内一致；当前 14D RoboTwin checkpoint 必须使用新 PolicySpec GGUF 单独完成 parity，不能把 legacy donor 的通过结论外推给它。
+- donor 的 `text_encoder.cpp` 迁入 `language_encoder.cpp`；`vae.cpp` 的模型数学迁入 `observation_encoder.cpp`；`mot.cpp` 中的 joint block 与 action/denoise 职责分别迁入 `backbone.cpp` 和 `action.cpp`；`weights.cpp` 中混合的 backend/graph runtime 移入 `runtime.cpp`；prefix cache 继续保留在可选 `cache.cpp`。这是私有接口和编译单元整理，不允许同时修改公式或执行顺序。
 
 ## 9. FastWAM 新增实现
 
@@ -765,7 +881,16 @@ src/models/fastwam/model.h
 src/models/fastwam/model.cpp
 src/models/fastwam/semantics.h
 src/models/fastwam/semantics.cpp
-src/models/fastwam/engine/
+src/models/fastwam/engine/engine.h
+src/models/fastwam/engine/engine.cpp
+src/models/fastwam/engine/engine_internal.h
+src/models/fastwam/engine/weights.cpp
+src/models/fastwam/engine/runtime.cpp
+src/models/fastwam/engine/language_encoder.cpp
+src/models/fastwam/engine/observation_encoder.cpp
+src/models/fastwam/engine/backbone.cpp
+src/models/fastwam/engine/action.cpp
+src/models/fastwam/engine/cache.cpp            # 仅在真实实现需要时增加
 ```
 
 并在 `src/arch.h`、`src/model_registry.cpp`、`cmake/WamModels.cmake` 和 `cmake/WamOptions.cmake` 中注册 `fastwam` 与 `WAM_BUILD_FASTWAM`。
@@ -1113,15 +1238,20 @@ message RpcError {
 - C++ `Inputs.action_noise` 在 wire request 中同样使用 `action_noise`，不保留含义不明确的通用 `noise` 名称。
 - error detail 对缺失角色、维度、representation 和 environment compatibility 使用稳定 field 名称。
 
-### 11.3 `src/serving/protocol_adapter.cpp`
+### 11.3 C ABI 和 protocol adapter
 
-修改：
+0.5 的 C ABI 是 Python server 与 C++ runtime 之间的进程内边界，不是远程
+wire。`libwam_c_api.so` 暴露 model/session create/free、predict/reset、完整 metadata
+读取和显式 result/error free；C struct 使用固定宽度类型，options 带 `struct_size`。
+development ABI v2 完整传递公共 `Stats`，包括具名 `model_timings`，并由调用方通过
+prediction free 统一释放其名称和数组；Python bridge 不再重建或丢弃 engine 阶段计时。
+内部 metadata 暂用 JSON 传给同进程 Python bridge，再由 bridge 显式填充
+`ModelInfo/PolicySpec` Protobuf；该 JSON 不进入 WebSocket，也不是 wire fallback。
 
-- 序列化完整 PolicySpec。
-- 对新增枚举进行显式映射，未知枚举失败，不能默认转换。
-- 保持 request tensor 的 size/overflow/byte order 校验。
-- 校验 envelope oneof、连接状态、严格递增 request id 和 CanonicalObservation/action_noise 的 dtype/shape。
-- 增加 PolicySpec Proto round-trip fixture。
+`eval/common/rpc.py` 和 `server.py` 负责 Protobuf envelope、tensor size/shape、
+oneof、严格 request id 和连接状态校验。`proto/wam.proto` 由构建生成 descriptor
+set，client/server 都从同一 descriptor 动态加载 message，避免维护另一份手写
+Python schema。PolicySpec round-trip 和错误状态机进入 RPC fixture。
 
 ### 11.4 Python serving bridge
 
@@ -1134,6 +1264,11 @@ message RpcError {
 - server 握手返回 architecture、profile、checkpoint revision、artifact schema/size、输入角色、state/action spec、runtime/protocol version，不返回或依赖完整文件 hash。
 - 删除客户端手工传入 `arch`、action shape、view count 和 stats JSON 的需要。
 - backend、precision、device 等 runtime 参数仍可以通过 server CLI 配置；`execute_steps` 由 simulator runner/client 的 deployment config 配置，replan/ensemble 在相应控制策略实现后再定义配置。
+
+GWP05 RoboTwin GGUF 包含 T5 权重但不包含 tokenizer vocabulary。0.5 不增加
+tokenizer manager 或自动下载；该 server 通过显式、本地、server-owned
+`--tokenizer` 路径加载与 profile family 相符的 UMT5 tokenizer，只构造 token
+ids/mask，T5 和其余模型计算仍在 C++。client 不能提供或覆盖 tokenizer 路径。
 
 ### 11.5 启动方式
 
@@ -1148,10 +1283,11 @@ python eval/sim/run_robotwin_server.py \
   --precision bf16
 ```
 
-切换 GWP-0.5 时只替换：
+切换 GWP-0.5 token profile 时替换模型并显式提供本地 tokenizer：
 
 ```text
 --model models/gwp05-robotwin-dual-arm.gguf
+--tokenizer models/Wan2.2-TI2V-5B-Diffusers/tokenizer
 ```
 
 如果加载 LIBERO GGUF 启动 RoboTwin server，server 必须在接受第一个 episode 前因相机角色、state layout 或 action representation 不兼容而失败。
@@ -1288,7 +1424,7 @@ scripts/
 ### 14.4 Serving 测试
 
 - ClientEnvelope/ServerEnvelope、CanonicalObservation、ModelInfo/PolicySpec Proto round trip。
-- C ABI serialized request/response。
+- C ABI structured input/output、metadata、错误和显式内存释放。
 - 只接受 WebSocket binary Protobuf message，拒绝 text/JSON/msgpack frame、非法 oneof 和超大 payload。
 - 强制 Hello-first、protocol major、environment id 和 request id 单调递增；覆盖环境不匹配和请求乱序的 fatal error。
 - server 启动时使用对应 environment contract 做权威兼容性检查；client 不执行第二套 PolicySpec compatibility 判定。
@@ -1324,8 +1460,8 @@ scripts/
 
 ### Phase 0：冻结现状
 
-- 固定当前 GWP-0.5 RoboTwin 输入、输出、artifact 和 PyTorch/C++ fixture。
-- 在 GWP fixture 中固定 normalized `[48,32]` action、反归一化后的 `[48,14]` mixed action、请求 raw state、reference-state mapping 和最终 `[48,14]` joint-position action，分别验证每个恢复阶段。
+- 固定 GWP-0.5 legacy donor 和当前 RoboTwin 两套不同的输入、输出、artifact 与 PyTorch/C++ fixture，不允许共享未结构化的默认 profile。
+- legacy donor fixture 固定 normalized `[48,32]` action、反归一化后的 `[48,14]` mixed action、请求 raw state、reference-state mapping 和最终 `[48,14]` joint-position action；当前 RoboTwin fixture 对应 normalized `[48,14]` z-score action，并使用相同 mixed recovery mapping，分别验证每个恢复阶段。
 - 固定 FastWAM 三套 Python preprocessing、normalization 和 action 后处理 fixture。
 - 记录 GWP-0.5 LIBERO/LIBERO-X 权重为训练中，记录 FastWAM 三套可用权重的路径、revision、模型变体和许可证。
 - 记录当前 server 协议和启动命令。
@@ -1444,7 +1580,7 @@ scripts/
 - 0.5 最终目标仍是 GWP-0.5/FastWAM 对 LIBERO/LIBERO-X/RoboTwin 的六种组合；GWP-0.5 的 LIBERO/LIBERO-X 权重训练中，其他四种组合已有权重。
 - PolicySpec 只描述 checkpoint 的外部输入输出与 pre/post-processing 契约，不保存 simulator、rollout 和模型内部 geometry。
 - 环境 raw key/语义转换分别属于 observation/action adaptation；wire 传原始 instruction，serving request bridge 只使用当前 profile/部署已经验证的 language path；共有图像/state/action 数值处理由具体 session 调用 C++ 无状态 policy 函数；模型数学属于 architecture session 私有实现。
-- 0.5 暂不设计 external-tokenizer manager 及其资源发现、下载、revision 解析、文件校验、容器挂载和生命周期。依赖该未决机制的 profile 显式 `Unsupported`，外部 tokenizer 部署不再作为 0.5 待确认后强行闭环的发布项。
+- 0.5 暂不设计 external-tokenizer manager 及其自动发现、下载、revision 解析、文件校验和跨 profile 生命周期。GWP05 RoboTwin 使用 server-owned 显式本地 UMT5 路径；依赖更多资源管理能力的 profile 显式 `Unsupported`。
 - 0.5 保持 flat state API：adapter 按 `StateSpec.fields` 排序，C++ 只做 validate/pad/normalization。
 - 图像预处理配置随 checkpoint 写入 GGUF，模型加载时一次性解析/校验为只读 `ImageSpec`；预测时具体 session 调用不依赖 `GgufReader` 的公共 policy image 函数执行。请求只提供命名的实际图像数据，环境 adapter 和 transport 不执行 checkpoint resize/composition/pixel-range/layout。per-view resize 使用语义明确的 `none`、`stretch` 或 `cover_center_crop`，图像组合使用 `none` 或通用 `canvas + placements`，不为环境布局增加专用分支。
 - runtime/server 始终返回完整 `[horizon, real_action_dim]` PolicyActionChunk；最小 ActionChunkExecutor 位于 simulator side，`execute_steps` 不进入 PolicySpec，replan/ensemble 等尚未冻结的控制策略也不进入模型契约。

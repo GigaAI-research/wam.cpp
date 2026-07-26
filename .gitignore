@@ -54,6 +54,10 @@ core
 core.*
 /action*.f32
 /report*.json
+/rollout*.json
+/benchmark*.json
+/results/
+/eval/**/results/
 
 # Internal replay payloads are local-only until redistribution is approved.
 /tests/data/gwp05/fixed/

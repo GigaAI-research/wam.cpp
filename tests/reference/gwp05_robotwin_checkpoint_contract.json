@@ -1,0 +1,177 @@
+{
+  "format": "wam-gwp05-robotwin-gate-a-contract-v2",
+  "checkpoint_revision": "checkpoint_epoch_9_step_100000/transformer_ema",
+  "status": "Gate A passed: formal artifact plus independent PyTorch/C++ BF16 CUDA parity accepted",
+  "architecture": {
+    "class": "CasualWorldActionTransformer_MoT",
+    "hidden": 3072,
+    "layers": 30,
+    "heads": 24,
+    "head_dim": 128,
+    "ffn_dim": 14336,
+    "action_hidden": 1024,
+    "action_ffn_dim": 4096,
+    "state_model_dim": 14,
+    "action_model_dim": 14,
+    "num_embodiments": 1,
+    "vae_z_dim": 48
+  },
+  "policy": {
+    "profile": "gwp05_robotwin_dual_arm_14d_zscore",
+    "views": [
+      "camera_high",
+      "camera_left_wrist",
+      "camera_right_wrist"
+    ],
+    "canvas": {
+      "height": 384,
+      "width": 320,
+      "placements": {
+        "camera_high": [0, 0, 320, 256],
+        "camera_left_wrist": [0, 256, 160, 128],
+        "camera_right_wrist": [160, 256, 160, 128]
+      },
+      "resize_mode": "cover_center_crop",
+      "interpolation": "bilinear",
+      "resample_boundary": "schema_v2_truncate_and_renormalize"
+    },
+    "state": {
+      "real_dim": 14,
+      "model_dim": 14,
+      "normalization": "z_score"
+    },
+    "action": {
+      "horizon": 48,
+      "real_dim": 14,
+      "model_dim": 14,
+      "normalization": "z_score",
+      "representation": "joint_position",
+      "recovery": "add_current_state",
+      "reference_state_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        -1,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        -1
+      ]
+    }
+  },
+  "formal_artifact": {
+    "conversion_policy": "mot-vae-bf16-qkv-v1",
+    "converter_revision": "wam-0.5-gwp05-policy-spec-v2",
+    "artifact_schema_version": 2,
+    "size_bytes": 23512797984,
+    "tensor_count": 1756,
+    "full_file_hash": "intentionally_not_computed",
+    "python_inspector": "pass",
+    "cpp_policy_spec_artifact_gate": "pass"
+  },
+  "converter_dry_run": {
+    "conversion_policy": "mot-vae-bf16-qkv-v1",
+    "gwp": {
+      "tensor_count": 1424,
+      "source_dtype": "F32",
+      "stored_dtype": "BF16",
+      "stored_bytes": 12043107484
+    },
+    "t5": {
+      "tensor_count": 242,
+      "source_dtype": "BF16",
+      "stored_dtype": "BF16",
+      "stored_bytes": 11361820672
+    },
+    "vae": {
+      "tensor_count": 82,
+      "source_dtype": "F32",
+      "stored_dtype": "BF16",
+      "stored_bytes": 107756096
+    },
+    "stats": {
+      "tensor_count": 8,
+      "source_dtype": "F32",
+      "stored_dtype": "F32",
+      "stored_bytes": 448
+    }
+  },
+  "numerical_gate": {
+    "fixture": "one real beat_block_hammer observation with explicit 48x14 action noise",
+    "language": "independent PyTorch UMT5 BF16 embedding with max_tokens=64",
+    "runtime": "public Model/Session, CUDA, BF16, prefix cache enabled",
+    "predeclared_tolerances": {
+      "processed_image": {
+        "mean_abs": 0.01,
+        "max_abs": 0.03
+      },
+      "normalized_state": {
+        "mean_abs": 1e-06,
+        "max_abs": 1e-05
+      },
+      "normalized_action": {
+        "mean_abs": 0.012,
+        "max_abs": 0.1
+      },
+      "recovered_action": {
+        "mean_abs": 0.006,
+        "max_abs": 0.04
+      },
+      "strict_pytorch_target_reported_separately": {
+        "mean_abs": 0.001,
+        "max_abs": 0.01
+      }
+    },
+    "pytorch_reference": {
+      "manifest_sha256": "c287f36ddecfee8dd886a70d663bb1e9cf593701ef8800a2a1141a6f1314ff08",
+      "input_manifest_sha256": "f1d55ee512b3a43a11de7ffc51f08382c399fca2979e7497fa5e86ffe758ecaa",
+      "gpu": "NVIDIA A800 80GB PCIe",
+      "compute_capability": [8, 0],
+      "torch": "2.7.1+cu126",
+      "dtype": "bfloat16",
+      "allow_tf32": false,
+      "deterministic_algorithms": true,
+      "peak_device_memory_bytes": 25038206976,
+      "load_milliseconds": 96481.04114178568,
+      "predict_milliseconds": 1122.9669889435172
+    },
+    "cpp_cuda_target": {
+      "compute_capability": 80,
+      "runtime": "native-bf16 packed-qkv with BF16 VAE and prefix cache",
+      "ctest": "pass"
+    },
+    "results": {
+      "processed_image": {
+        "mean_abs": 0.00114409,
+        "max_abs": 0.00764728
+      },
+      "normalized_state": {
+        "mean_abs": 0.0,
+        "max_abs": 0.0
+      },
+      "normalized_action": {
+        "mean_abs": 0.00140892,
+        "max_abs": 0.00781274
+      },
+      "recovered_action": {
+        "mean_abs": 0.000479634,
+        "max_abs": 0.00390983
+      },
+      "strict_pytorch_target": "pass",
+      "explicit_noise_reset_repeat": "bit_exact"
+    },
+    "execution": "pass"
+  },
+  "restrictions": [
+    "The legacy 32D quantile migration must reject this profile.",
+    "The formal artifact carries wam.artifact_schema_version and the complete PolicySpec.",
+    "Gate A numerical parity does not claim RoboTwin task success rate or simulator integration support.",
+    "Token and fixed-prompt language modes retain their separate fixtures and gates."
+  ]
+}

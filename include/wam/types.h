@@ -119,11 +119,12 @@ struct ArrayView {
     const T * data = nullptr;
     std::size_t size = 0;
 
-    ArrayView();
-    ArrayView(const T * values, std::size_t count);
-    explicit ArrayView(const std::vector<T> & values);
+    ArrayView() = default;
+    ArrayView(const T * values, std::size_t count) : data(values), size(count) {}
+    explicit ArrayView(const std::vector<T> & values)
+        : data(values.data()), size(values.size()) {}
     ArrayView(std::vector<T> &&) = delete;
-    bool empty() const noexcept;
+    bool empty() const noexcept { return size == 0; }
 };
 
 struct TokenInput {

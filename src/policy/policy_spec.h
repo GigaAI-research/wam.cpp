@@ -14,16 +14,23 @@ class GgufReader;
 
 namespace wam::internal::policy {
 
+inline constexpr std::uint32_t kPolicySpecDraftSchemaVersion = 2;
+
 enum class ResizeMode {
     none = 0,
-    resize,
-    center_crop_resize,
+    stretch,
+    cover_center_crop,
 };
 
 enum class InterpolationMode {
     nearest = 0,
     bilinear,
     bicubic,
+};
+
+enum class ResampleBoundaryMode {
+    truncate = 0,
+    clamp,
 };
 
 enum class ImageCompositionKind {
@@ -84,6 +91,11 @@ enum class GripperEncoding {
     discrete,
 };
 
+enum class ActionRecoveryKind {
+    identity = 0,
+    add_current_state,
+};
+
 struct PolicyIdentity {
     std::uint32_t artifact_schema_version = 0;
     std::string profile;
@@ -98,6 +110,7 @@ struct ImageTransformSpec {
     std::uint32_t target_width = 0;
     ResizeMode resize = ResizeMode::none;
     InterpolationMode interpolation = InterpolationMode::bilinear;
+    bool antialias = false;
 };
 
 struct ImagePlacement {
@@ -121,6 +134,8 @@ struct ImageSpec {
     ColorSpace color_space = ColorSpace::rgb;
     PixelRange pixel_range = PixelRange::minus_one_to_one;
     TensorLayout tensor_layout = TensorLayout::chw;
+    ResampleBoundaryMode resample_boundary =
+        ResampleBoundaryMode::truncate;
 };
 
 struct NormalizationSpec {
@@ -143,6 +158,7 @@ struct StateSpec {
     std::size_t model_dim = 0;
     float pad_value = 0.0F;
     NormalizationSpec normalization;
+    NormalizationStats stats;
 };
 
 struct LanguageSpec {
@@ -158,6 +174,11 @@ struct LanguageSpec {
     std::vector<std::int32_t> special_token_ids;
 };
 
+struct ActionRecoverySpec {
+    ActionRecoveryKind kind = ActionRecoveryKind::identity;
+    std::vector<std::int32_t> reference_state_indices;
+};
+
 struct ActionSpec {
     std::size_t horizon = 0;
     std::size_t real_dim = 0;
@@ -167,6 +188,8 @@ struct ActionSpec {
     ActionFrame frame = ActionFrame::unknown;
     GripperEncoding gripper = GripperEncoding::none;
     NormalizationSpec normalization;
+    NormalizationStats stats;
+    ActionRecoverySpec recovery;
 };
 
 struct PolicySpecDraft {
@@ -177,7 +200,8 @@ struct PolicySpecDraft {
     ActionSpec action;
 };
 
-std::optional<PolicySpecDraft> try_read_policy_spec_draft(const GgufReader & reader);
+std::optional<PolicySpecDraft> try_read_policy_spec_draft(
+    const GgufReader & reader);
 void validate_policy_spec_draft(const PolicySpecDraft & spec);
 std::size_t policy_image_count(const PolicySpecDraft & spec) noexcept;
 const ImageTransformSpec & require_image_spec(const PolicySpecDraft & spec,

@@ -1,0 +1,239 @@
+syntax = "proto3";
+
+package wam.rpc.v05;
+
+message Version {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+enum TensorDType {
+  TENSOR_DTYPE_UNSPECIFIED = 0;
+  TENSOR_DTYPE_F32 = 1;
+  TENSOR_DTYPE_I32 = 2;
+  TENSOR_DTYPE_U8 = 3;
+}
+
+message Tensor {
+  TensorDType dtype = 1;
+  repeated uint64 shape = 2;
+  bytes data = 3;
+}
+
+enum ImageEncoding {
+  IMAGE_ENCODING_UNSPECIFIED = 0;
+  IMAGE_ENCODING_RGB_U8 = 1;
+  IMAGE_ENCODING_PNG = 2;
+  IMAGE_ENCODING_JPEG = 3;
+}
+
+message Image {
+  string name = 1;
+  ImageEncoding encoding = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  bytes data = 5;
+}
+
+message CanonicalObservation {
+  repeated Image images = 1;
+  Tensor state = 2;
+  string instruction = 3;
+}
+
+message PredictRequest {
+  CanonicalObservation observation = 1;
+  optional Tensor action_noise = 2;
+}
+
+message PhaseTiming {
+  string name = 1;
+  double milliseconds = 2;
+}
+
+message Stats {
+  double preprocess_milliseconds = 1;
+  double model_milliseconds = 2;
+  double model_vision_milliseconds = 3;
+  double model_text_milliseconds = 4;
+  double model_prefill_milliseconds = 5;
+  double model_decode_milliseconds = 6;
+  double postprocess_milliseconds = 7;
+  double total_milliseconds = 8;
+  repeated PhaseTiming model_timings = 9;
+  uint64 peak_device_memory_bytes = 10;
+}
+
+message Prediction {
+  Tensor action = 1;
+  Stats stats = 2;
+}
+
+message PredictResponse { Prediction prediction = 1; }
+
+message NormalizationSpec {
+  string kind = 1;
+  bool clip = 2;
+  float epsilon = 3;
+  repeated float mean = 4;
+  repeated float stddev = 5;
+  repeated float q01 = 6;
+  repeated float q99 = 7;
+  repeated uint32 mask = 8;
+}
+
+message ImageTransformSpec {
+  string role = 1;
+  uint32 target_height = 2;
+  uint32 target_width = 3;
+  string resize = 4;
+  string interpolation = 5;
+  bool antialias = 6;
+}
+
+message ImagePlacement {
+  string role = 1;
+  uint32 x = 2;
+  uint32 y = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+}
+
+message ImageCompositionSpec {
+  string kind = 1;
+  uint32 height = 2;
+  uint32 width = 3;
+  repeated ImagePlacement placements = 4;
+}
+
+message ImageSpec {
+  repeated ImageTransformSpec views = 1;
+  ImageCompositionSpec composition = 2;
+  string color_space = 3;
+  string pixel_range = 4;
+  string tensor_layout = 5;
+  string resample_boundary = 6;
+}
+
+message StateSpec {
+  repeated string fields = 1;
+  uint64 real_dim = 2;
+  uint64 model_dim = 3;
+  float pad_value = 4;
+  NormalizationSpec normalization = 5;
+}
+
+message LanguageSpec {
+  string input_mode = 1;
+  string prompt_template = 2;
+  string tokenizer_family = 3;
+  string tokenizer_revision = 4;
+  uint64 max_tokens = 5;
+  bool text_encoder_in_artifact = 6;
+  string padding_side = 7;
+  string truncation_side = 8;
+  bool attention_mask_required = 9;
+  repeated int32 special_token_ids = 10;
+}
+
+message ActionRecoverySpec {
+  string kind = 1;
+  repeated int32 reference_state_indices = 2;
+}
+
+message ActionSpec {
+  uint64 horizon = 1;
+  uint64 real_dim = 2;
+  uint64 model_dim = 3;
+  repeated string fields = 4;
+  string representation = 5;
+  string frame = 6;
+  string gripper = 7;
+  NormalizationSpec normalization = 8;
+  ActionRecoverySpec recovery = 9;
+}
+
+message PolicySpec {
+  uint32 artifact_schema_version = 1;
+  string profile = 2;
+  string checkpoint_revision = 3;
+  string training_dataset = 4;
+  string embodiment = 5;
+  ImageSpec images = 6;
+  StateSpec state = 7;
+  LanguageSpec language = 8;
+  ActionSpec action = 9;
+}
+
+message Capabilities {
+  bool action = 1;
+  bool raw_images = 2;
+  bool token_input = 3;
+  bool precomputed_embedding = 4;
+  bool explicit_action_noise = 5;
+  bool concurrent_sessions = 6;
+}
+
+message ModelInfo {
+  string architecture = 1;
+  string artifact_policy = 2;
+  string artifact_sha256 = 3;
+  uint64 artifact_bytes = 4;
+  string backend = 5;
+  string compute_precision = 6;
+  string language_mode = 7;
+  Capabilities capabilities = 8;
+  Version runtime_version = 9;
+  Version protocol_version = 10;
+  PolicySpec policy_spec = 11;
+}
+
+message HelloRequest {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string environment_id = 3;
+}
+
+message HelloResponse { ModelInfo model_info = 1; }
+message ResetRequest {}
+message ResetResponse {}
+message CloseRequest {}
+message CloseResponse {}
+
+enum RpcErrorCode {
+  RPC_ERROR_UNSPECIFIED = 0;
+  RPC_ERROR_PROTOCOL = 1;
+  RPC_ERROR_INCOMPATIBLE = 2;
+  RPC_ERROR_INVALID_ARGUMENT = 3;
+  RPC_ERROR_UNSUPPORTED = 4;
+  RPC_ERROR_INTERNAL = 5;
+}
+
+message RpcError {
+  RpcErrorCode code = 1;
+  string field = 2;
+  string message = 3;
+  bool fatal = 4;
+}
+
+message ClientEnvelope {
+  uint64 request_id = 1;
+  oneof payload {
+    HelloRequest hello = 10;
+    PredictRequest predict = 11;
+    ResetRequest reset = 12;
+    CloseRequest close = 13;
+  }
+}
+
+message ServerEnvelope {
+  uint64 request_id = 1;
+  oneof payload {
+    HelloResponse hello = 10;
+    PredictResponse predict = 11;
+    ResetResponse reset = 12;
+    CloseResponse close = 13;
+    RpcError error = 14;
+  }
+}

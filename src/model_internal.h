@@ -5,6 +5,10 @@
 
 #include <memory>
 
+namespace wam {
+struct Model;
+}
+
 namespace wam::internal {
 
 class SessionImpl {
@@ -28,5 +32,8 @@ protected:
     ModelInfo info_;
     policy::PolicySpecDraft policy_spec_;
 };
+
+Model * adopt_model(std::unique_ptr<ModelImpl> impl);
+const ModelImpl & model_impl(const Model * model);
 
 } // namespace wam::internal

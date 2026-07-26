@@ -188,8 +188,8 @@ Slice 1 新建/调整：
 ```text
 release/cmake/ApplyLlamaPatch.cmake
 release/cmake/Dependencies.cmake
-release/patches/llama-b9866-native-bf16.patch
-release/patches/llama-b9866-p7-fusions.patch
+release/patches/llama-b9866-native-bf16.patch  # Slice 4 reference only
+release/patches/llama-b9866-p7-fusions.patch   # Slice 4 reference only
 release/src/models/common/gguf_reader.*
 donor/scripts/common/gwp05_gguf.py
 donor/scripts/convert/convert_gwp05.py
@@ -198,16 +198,16 @@ donor/tests/integration/phase3_artifacts.cpp
 donor/tests/unit/test_converter.py
 ```
 
-依赖/patched GGUF runtime 可以从 release 恢复 provenance；reader、converter 和 inspector 必须适配 0.5 PolicySpec，不恢复旧 metadata 作为新 schema。
+Slice 2 只复用 release pinned llama.cpp `b9866` revision/archive hash，不应用与模型计算有关的 BF16/fusion patch，也不构建 CPU/CUDA backend。reader 适配 0.5 internal PolicySpecDraft，不恢复旧 metadata 作为新 schema；patch 在 Slice 4 engine 迁入时按数值 reference 单独评估。
 
-新增目标文件：
+loader/validator 保持在已有的：
 
 ```text
-src/policy/policy_spec_loader.cpp
-src/policy/policy_spec_loader.h
+src/policy/policy_spec.cpp
+src/policy/policy_spec.h
 ```
 
-Slice 2 不迁入 GWP engine 或 serving。
+Slice 2 增加结构化 test-only GGUF fixture builder，不提交生成的二进制 artifact。converter/inspector 和六个真实 profile fixture 在对应 architecture contract/schema freeze 阶段实现。Slice 2 不迁入 GWP engine 或 serving。
 
 ## 7. Slice 3：GWP contract
 
@@ -225,29 +225,53 @@ tests/unit/kernel_dispatch.cpp
 
 迁入职责限于 artifact metadata、GWP geometry、input validation 和 scheduler contract。不得在 Slice 3 带入 weights、graph、CUDA 或旧 public types。
 
+Slice 3 已完成上述 `ADAPT` 范围：新 draft PolicySpec 与已审计 32D quantile dual-arm legacy migration 均可 metadata-only load；legacy artifact 缺少可靠 dataset provenance，因此不再标成 RoboTwin。GWP 私有 geometry/旧重复字段交叉校验，input tensor contract、prompt/MoT structural semantics 和 flow-match scheduler 已由合成 fixture 覆盖。没有迁入 donor engine、weights、graph、kernel、旧 API 或真实 replay payload。`tests/unit/kernel_dispatch.cpp` 依赖 engine dispatch，保留到 Slice 4，不在 Slice 3 用空实现占位。
+
+Slice 4A 增加 `LOCAL_ONLY` 真实 Gate：四个 22–34 GiB GGUF 的 legacy F32、MoT BF16、MoT+VAE BF16 和 packed-QKV descriptor/policy、legacy PolicySpec 与 metadata-only lifecycle 已通过；donor complete-MoT F32 CPU reference 与独立 CUDA prefix-cache reference 由 path-free manifest 固定。Gate A 又为当前 14D z-score RoboTwin checkpoint 生成正式 schema-v2 PolicySpec packed-BF16 GGUF，并通过独立 inspector、artifact loader、metadata lifecycle 与 A800 public CUDA/BF16 Session 数值 parity。该结论来自独立 14D fixture，未由 legacy Gate 外推。
+
 ## 8. Slice 4：GWP 私有 engine
 
-以下文件作为一个 `IMPORT_PRIVATE` 单元：
+以下 donor/release 文件作为一个数值上不可拆散的 `IMPORT_PRIVATE` 来源单元：
 
 ```text
-src/models/gwp05/engine/engine.cpp
-src/models/gwp05/engine/engine.h
-src/models/gwp05/engine/weights.cpp
-src/models/gwp05/engine/text_encoder.cpp
-src/models/gwp05/engine/vae.cpp
-src/models/gwp05/engine/mot.cpp
-src/models/gwp05/engine/cache.cpp
-src/models/gwp05/kernels/cuda_preprocess.cu
-src/models/gwp05/kernels/cuda_preprocess.h
+donor/src/models/gwp05/engine/engine.cpp
+donor/src/models/gwp05/engine/engine.h
+donor/src/models/gwp05/engine/weights.cpp
+donor/src/models/gwp05/engine/text_encoder.cpp
+donor/src/models/gwp05/engine/vae.cpp
+donor/src/models/gwp05/engine/mot.cpp
+donor/src/models/gwp05/engine/cache.cpp
+donor/src/models/gwp05/kernels/cuda_preprocess.cu
+donor/src/models/gwp05/kernels/cuda_preprocess.h
 ```
 
-新增私有共享头：
+target 不沿用 donor 的组件文件名作为顶层结构，而统一成 architecture engine 职责：
 
 ```text
-src/models/gwp05/engine/engine_internal.h
+src/models/gwp05/
+  engine/
+    engine.h
+    engine.cpp
+    engine_internal.h
+    weights.cpp
+    runtime.cpp
+    language_encoder.cpp
+    observation_encoder.cpp
+    backbone.cpp
+    action.cpp
+    cache.cpp
+  kernels/
+    cuda_preprocess.cu
+    cuda_preprocess.h
 ```
 
-迁入时允许机械移动和私有接口整理，不允许改变数学。旧 engine 使用的 `.cpp` include 必须转换成正常编译单元。所有变更用 donor 中间 tensor/replay 做 parity。
+具体映射为：`text_encoder.cpp -> language_encoder.cpp`；`vae.cpp -> observation_encoder.cpp`；`mot.cpp` 的 joint block 与 action/denoise 分别进入 `backbone.cpp` 和 `action.cpp`；`weights.cpp` 的 tensor binding 保留在 `weights.cpp`，backend/graph/buffer 部分进入 `runtime.cpp`；`cache.cpp` 继续承担可选 prefix/KV/graph cache。T5、VAE、MoT 和具体 kernel 名称保留在类型、函数、权重前缀和 reference stage 中。
+
+每个 architecture 的 facade 统一为 model-level `create_engine()`、轻量 `create_engine_session()`、`predict()` 和 `reset()`，但 engine/session 具体类型保持 architecture-private，不建立跨模型 `LanguageEncoder`/`Backbone`/`ActionHead` 基类，也不共享 prepared/core tensor 类型。迁入时允许机械移动和私有接口整理，不允许改变数学。旧 engine 使用的 `.cpp` include 必须转换成正常编译单元。所有变更用 donor 中间 tensor/replay 做 language、observation、backbone、action 和 cache 分阶段 parity。
+
+Slice 4B 已完成上述 `IMPORT_PRIVATE` 的 target 重组：所有 donor `.cpp` include 已删除，权重绑定、backend/runtime、T5、VAE、MoT、action denoise 和 prefix cache 分别进入声明的职责文件；pinned fusion/native-BF16 patch 与当时的 CUDA preprocess 已进入 opt-in CUDA build。legacy F32 external-embedding complete-MoT 通过真实 GGUF 的逐阶段 donor parity，engine 返回 normalized `[48,32]` action，并验证 reset 和显式 noise 确定性。Slice 6 为建立统一 policy boundary 已删除跨越 raw-image resize/canvas 与 GWP patchify 的旧 fused preprocess；CUDA engine 现从公共 CPU reference composite 上传，未来设备优化必须只实现等价公共 image ops 或 architecture-private patchify。CUDA + cuDNN native-BF16 继续要求完整编译和链接，但当前容器没有可用 GPU，CUDA prefix-cache、BF16 和 token/fixed prompt 的独立数值 Gate 仍保持明确未验证，不能由编译成功替代。
+
+测试所有权固定为：artifact test 保持 metadata-only；weights/runtime test 负责 backend 和完整 binding；engine parity 到 normalized/model-space action 为止；公共 action decode 和 Session/serving 分别属于 Slice 5–7。engine 的 vision/text/prefill/decode timing 按计算阶段统计，T5/VAE/MoT/cache/denoise step 的真实名称进入 `model_timings`。
 
 不迁入：apps、C API、Proto、server、environment integration。
 
@@ -266,6 +290,8 @@ tests/parity/gwp05_replay.cpp
 ```
 
 旧代码只提供 load/session/cache/error 的行为参考。0.5 public types、registry 和 `SessionImpl::predict()` 是权威边界，不能恢复 `active_session`、旧 noise 字段或旧 ModelInfo。
+
+Slice 5 已完成该 `ADAPT`：model-level private engine 唯一拥有 backend/weights，轻量 engine session 独立拥有 graph/cache/workspace，architecture `Gwp05SessionImpl` 拥有请求 RNG，公共 Model/Session 已接通 load/create/predict/reset/free。共享 backend execution 串行化，但没有 session 切换式全局 cache；model handle 提前释放时资源由现存 session 延长生命周期。Slice 5 的 legacy F32 私有 action adapter 已在 Slice 6 被通用 policy ops 替换。
 
 ## 10. Slice 6：Policy boundary
 
@@ -286,6 +312,14 @@ donor GWP engine 中对应逻辑只作为 `REFERENCE`：
 
 迁移完成后从 engine 删除这些职责。不得在 policy ops 中判断 `gwp05`、`fastwam` 或 environment name。
 
+Slice 6 已完成该边界迁移：
+
+- `image_ops` 校验/排序 named RGB view，执行 `none/stretch/cover_center_crop`、nearest/bilinear/bicubic reference、antialias、canvas、pixel range 和 CHW/HWC layout；legacy GWP migration 已从错误的 `stretch` 修正为 donor 实际使用的 `cover_center_crop`。
+- `state_ops` 保留 raw state，并生成按 mask 处理的 padded/normalized model state；`action_ops` 执行 model action 校验、`trim -> clip -> unnormalize -> raw-state recovery` 和最终 tensor 构造。
+- action noise 由无状态公共函数校验或生成，RNG 本体与初始 seed 由具体 session 持有；显式 noise 不推进 RNG，reset 恢复 seed。
+- GWP engine 只接收 RGB CHW `[-1,1]` composite、model-space state 和完整 action noise，只返回 normalized/model-space action；VAE latent normalization、2x2 patchify、T5、MoT、scheduler 和 cache 仍为 architecture 私有。
+- 公共 policy 层没有 model/environment 分支；私有 artifact contract 不再复制 state/action normalization statistics。
+
 ## 11. Slice 7：新 serving
 
 以下旧文件状态为 `REFERENCE`，不直接恢复：
@@ -301,7 +335,7 @@ donor/eval/robotwin/inference_server_wam.py
 
 原因：旧链路是旧 Proto/C ABI/gRPC 或 GWP-specific server，不满足 WebSocket binary + Protobuf、Hello-first、连接级 session 和 environment-specific server contract。
 
-Slice 7 按 0.5 contract 新建 Proto、codec、server core 和测试。C ABI 是否同时恢复由当时真实调用方决定，不作为新 wire 的前置条件。
+Slice 7 按 0.5 contract 新建 Proto、structured C ABI、codec、server core 和测试；没有恢复旧 C ABI method dispatch、gRPC service 或 msgpack wire。
 
 ## 12. Slice 8：FastWAM 和 eval
 
@@ -427,4 +461,4 @@ Slice 8: Add FastWAM and simulator evaluation
 
 ## 18. 下一步
 
-完成 Slice 0 cleanup commit 后，只开始 Slice 1：设计正式 `wam_core`、最小测试 target、registry unsupported path 和 lifecycle contract。GGUF dependency 和任何 GWP engine 文件留到后续 Slice。
+Slice 6、Gate A 和 Slice 7 已完成。legacy F32 gate、CPU/CUDA build matrix、14D z-score RoboTwin 正式 GGUF、独立 PyTorch BF16 oracle、public Session parity、C ABI 和 WebSocket/Protobuf 状态机均有证据；不恢复 release gRPC/msgpack server。正式 token path RPC parity 通过，`beat_block_hammer` 跨容器单 episode smoke test 为 1/1，固定 manifest 100 次正式评测为 `87/100`，且没有 RPC/runtime failure。下一步进入 FastWAM Gate B，并复用相同 manifest 和延迟口径验证公共抽象。
