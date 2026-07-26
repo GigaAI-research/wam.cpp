@@ -85,3 +85,59 @@ steps with 9 RPC requests. Server total latency across all requests had mean 749
 649.62 ms. The first request included 405.42 ms of UMT5 execution; subsequent requests hit the
 prompt cache. This result verifies integration only and does not replace a fixed-manifest
 multi-episode success-rate evaluation.
+
+## Fixed Manifest Evaluation
+
+Generate the manifest in the LIBERO container. Creation validates every selected task and its
+available init-state count. The manifest freezes simulator seed, explicit action-noise seed,
+image resolution, wait steps, replan steps, gripper conversion and maximum episode steps.
+
+```bash
+python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_libero_client.py \
+  --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
+  --create-manifest /tmp/libero-spatial-task0-20.json \
+  --suite libero_spatial \
+  --task-ids 0 \
+  --episodes 20 \
+  --base-seed 0 \
+  --action-noise-seed 100000 \
+  --replan-steps 10 \
+  --num-steps-wait 30
+```
+
+`--task-ids` accepts comma-separated ids and inclusive ranges, for example `0,2-4`. Run the
+frozen manifest after starting the same server command shown above:
+
+```bash
+python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_libero_client.py \
+  --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/build-gate-b-serving-checkpoint-cuda/wam.desc \
+  --manifest /tmp/libero-spatial-task0-20.json \
+  --output-dir /tmp/libero-spatial-task0-20-results \
+  --host 172.17.0.6 \
+  --port 18160
+```
+
+The output directory contains:
+
+```text
+manifest.json
+episodes.jsonl
+requests.jsonl
+errors.jsonl       # created only after an episode error
+summary.json
+```
+
+Each completed episode and request is flushed before the next episode. To continue an interrupted
+run, repeat the command with `--resume`. Resume verifies the manifest hash and model identity,
+removes orphan request records, and skips only episodes with `status=completed`.
+
+The runner sends deterministic explicit action noise with shape `[action.horizon,
+action.model_dim]`. This keeps manifest evaluation independent of the server session RNG while
+still calling `Reset` before every episode.
+
+The two-episode runner smoke used task 0, init states 0 and 1, and manifest SHA256
+`6a5e7bbe738f89fbe6e27f99a9618f0070990b47385dbed554cc36a15f334a7f`. Both episodes
+succeeded in 85 and 94 controller steps. The run produced 19 requests, server-total mean
+658.23 ms and median 601.50 ms. A subsequent `--resume` invocation skipped both episodes and
+preserved the same counts and summary.

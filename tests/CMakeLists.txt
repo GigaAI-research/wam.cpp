@@ -337,4 +337,10 @@ if(WAM_BUILD_SERVING AND TARGET wam_proto_descriptor)
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_language_provider.py)
     set_tests_properties(wam_language_provider PROPERTIES
         ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+
+    add_test(NAME wam_libero_manifest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_libero_manifest.py)
+    set_tests_properties(wam_libero_manifest PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
 endif()

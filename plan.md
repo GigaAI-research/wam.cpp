@@ -570,4 +570,4 @@ server 做权威 PolicySpec/EnvironmentContract compatibility check；client 持
 
 ## 18. 下一步
 
-Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值和 serving 纵向验证均已完成。FastWAM server-owned external embedding、C ABI v3 和 LIBERO 单 episode 已闭环。下一步实现 LIBERO 固定 manifest 多 episode runner，冻结 task/init-state/seed、reset、恢复运行、成功率和延迟统计口径；通过后再进入 FastWAM RoboTwin profile 和 LIBERO-X。
+Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。runner 冻结 task/init-state/simulator seed/explicit action-noise seed 和执行参数，逐 episode/request 落盘并支持带 manifest hash、模型身份和 orphan request 检查的恢复运行；task 0 两个 init-state smoke 为 `2/2`。下一步先冻结正式 LIBERO manifest 并扩大到 task 0 的 20 次评测，再扩展到完整 suite；之后进入 FastWAM RoboTwin profile 和 LIBERO-X。
