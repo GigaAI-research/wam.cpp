@@ -44,10 +44,16 @@ wam::TensorView f32_view(const std::vector<float> & values,
 
 int main(int argc, char ** argv) {
     using wam::test::require;
-    if (argc != 3) {
+    if (argc != 3 && argc != 5) {
         throw std::runtime_error(
-            "usage: wam_fastwam_libero_parity MODEL_GGUF REPLAY_DIR");
+            "usage: wam_fastwam_libero_parity MODEL_GGUF REPLAY_DIR "
+            "[MEAN_TOLERANCE MAX_TOLERANCE]");
     }
+    const double mean_tolerance = argc == 5 ? std::stod(argv[3]) : 9.0e-4;
+    const double maximum_tolerance = argc == 5 ? std::stod(argv[4]) : 5.0e-3;
+    require(std::isfinite(mean_tolerance) && mean_tolerance > 0.0 &&
+                std::isfinite(maximum_tolerance) && maximum_tolerance > 0.0,
+            "FastWAM parity tolerances must be finite and positive");
     const std::filesystem::path root = argv[2];
     const std::vector<std::uint8_t> scene = read_array<std::uint8_t>(
         root / "camera0.rgb", 224U * 224U * 3U);
@@ -63,11 +69,6 @@ int main(int argc, char ** argv) {
         read_array<float>(root / "noise.f32", 32U * 7U);
     const std::vector<float> expected =
         read_array<float>(root / "expected-action.f32", 32U * 7U);
-    const std::filesystem::path donor_path =
-        root / "cpp-dump" / "action_output.f32";
-    const std::vector<float> donor =
-        read_array<float>(donor_path, 32U * 7U);
-
     wam::ModelOptions options;
     options.artifact_path = argv[1];
     options.backend = wam::Backend::cuda;
@@ -103,8 +104,6 @@ int main(int argc, char ** argv) {
     std::vector<float> actual(expected.size());
     std::memcpy(actual.data(), prediction.action.data.data(),
                 prediction.action.data.size());
-    require(actual == donor,
-            "FastWAM public action differs from the frozen donor output");
     if (const char * output_path =
             std::getenv("WAM_FASTWAM_PARITY_OUTPUT")) {
         std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
@@ -124,7 +123,7 @@ int main(int argc, char ** argv) {
     const double mean = sum / actual.size();
     std::cerr << "FastWAM LIBERO action parity: mean_abs=" << mean
               << " max_abs=" << maximum << std::endl;
-    if (mean > 1.0e-3 || maximum > 1.0e-2) {
+    if (mean > mean_tolerance || maximum > maximum_tolerance) {
         throw std::runtime_error(
             "FastWAM LIBERO action parity exceeded tolerance: mean_abs=" +
             std::to_string(mean) + " max_abs=" +

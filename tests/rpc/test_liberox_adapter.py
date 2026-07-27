@@ -46,6 +46,15 @@ def run():
     assert command[:, -1].tolist() == [1.0, -1.0]
     assert chunk[:, -1].tolist() == [-0.25, 0.75]
 
+    first_noise = client.donor_action_noise(7, 32, 7)
+    repeated_noise = client.donor_action_noise(7, 32, 7)
+    assert first_noise.dtype == np.float32
+    assert np.array_equal(first_noise, repeated_noise)
+    assert np.array_equal(first_noise.reshape(-1)[:8], np.asarray([
+        -0.8203125, 0.396484375, 0.8984375, -1.390625,
+        -0.1669921875, 0.28515625, -0.640625, -0.89453125,
+    ], dtype=np.float32))
+
 
 def main():
     argparse.ArgumentParser().parse_args()

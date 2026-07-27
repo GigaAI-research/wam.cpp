@@ -83,7 +83,11 @@
     "recovery": {"kind": "identity"}
   },
   "normalization": {
-    "state": {"kind": "z_score", "clip": false},
+    "state": {
+      "kind": "z_score",
+      "clip": false,
+      "output_clamp": [-5.0, 5.0]
+    },
     "action": {"kind": "z_score", "clip": false},
     "epsilon": 1e-08
   }

@@ -121,10 +121,34 @@ int main() {
         image("stretch", stretch_source, 2, 1), stretch_transform,
         crop_spec);
     require(stretched.pixels.size() == 3 &&
-                near(stretched.pixels[0], 0.5F) &&
-                near(stretched.pixels[1], 0.5F) &&
-                near(stretched.pixels[2], 0.5F),
+                near(stretched.pixels[0], 128.0F / 255.0F) &&
+                near(stretched.pixels[1], 128.0F / 255.0F) &&
+                near(stretched.pixels[2], 128.0F / 255.0F),
             "stretch antialias reference changed");
+
+    const std::vector<std::uint8_t> pil_source = {
+        13, 50, 87, 124, 161, 198, 235, 16, 53, 90, 127, 164,
+        201, 238, 19, 56, 93, 130, 167, 204, 241, 22, 59, 96,
+        133, 170, 207, 244, 25, 62, 99, 136, 173, 210, 247, 28,
+        65, 102, 139, 176, 213, 250, 31, 68, 105, 142, 179, 216,
+        253, 34, 71, 108, 145, 182, 219, 0, 37, 74, 111, 148,
+    };
+    const std::vector<std::uint8_t> pil_11_3_reference = {
+        92, 129, 150, 128, 104, 133, 163, 137, 112,
+        159, 149, 139, 134, 122, 135, 126, 95, 132,
+    };
+    const ImageTransformSpec pil_transform{
+        "pil", 2, 3, ResizeMode::stretch,
+        InterpolationMode::bilinear, true};
+    const CpuImage pil_resized = transform_image_reference(
+        image("pil", pil_source, 5, 4), pil_transform, crop_spec);
+    require(pil_resized.pixels.size() == pil_11_3_reference.size(),
+            "PIL resize fixture geometry changed");
+    for (std::size_t i = 0; i < pil_resized.pixels.size(); ++i) {
+        require(static_cast<int>(std::lround(pil_resized.pixels[i] * 255.0F)) ==
+                    pil_11_3_reference[i],
+                "PIL bilinear uint8 parity changed");
+    }
 
     const std::vector<std::uint8_t> edge_source = {
         0, 0, 0, 64, 64, 64, 128, 128, 128,
@@ -144,8 +168,7 @@ int main() {
     legacy_edge_spec.resample_boundary = ResampleBoundaryMode::clamp;
     const CpuImage legacy_edge_resized = transform_image_reference(
         image("edge", edge_source, 1, 5), edge_transform, legacy_edge_spec);
-    require(near(legacy_edge_resized.pixels[0], 56.32F / 255.0F,
-                 1.0e-5F),
+    require(near(legacy_edge_resized.pixels[0], 56.0F / 255.0F),
             "legacy antialias boundary clamp changed");
 
     StateSpec state_spec;
@@ -177,6 +200,12 @@ int main() {
     normalize_state_reference(z_state, z_state_spec, z_state_spec.stats);
     require(z_state == std::vector<float>({1.0F, 1.0F}),
             "z-score state normalization changed");
+    z_state_spec.normalization.output_clamp_lower = -5.0F;
+    z_state_spec.normalization.output_clamp_upper = 5.0F;
+    z_state = {101.0F, -98.0F};
+    normalize_state_reference(z_state, z_state_spec, z_state_spec.stats);
+    require(z_state == std::vector<float>({5.0F, -5.0F}),
+            "z-score state output clamp changed");
 
     ActionSpec action_spec;
     action_spec.horizon = 2;

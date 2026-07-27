@@ -111,11 +111,8 @@ def load_policy_profile(path: Path) -> dict[str, Any]:
         kinds.add(spec["kind"])
     if len(kinds) != 1:
         raise ValueError("FastWAM state and action normalization kinds must match")
-    if kinds == {"min_max"}:
-        if normalization["state"].get("output_clamp") != [-5.0, 5.0]:
-            raise ValueError("FastWAM min_max state output clamp must be [-5,5]")
-    elif "output_clamp" in normalization["state"]:
-        raise ValueError("FastWAM z_score state normalization must not clamp")
+    if normalization["state"].get("output_clamp") != [-5.0, 5.0]:
+        raise ValueError("FastWAM state output clamp must be [-5,5]")
     if "output_clamp" in normalization["action"]:
         raise ValueError("FastWAM action normalization must not clamp")
     epsilon = normalization.get("epsilon")

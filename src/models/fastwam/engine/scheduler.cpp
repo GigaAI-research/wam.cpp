@@ -2,6 +2,8 @@
 
 #include "wam/types.h"
 
+#include "ggml.h"
+
 #include <cmath>
 #include <string>
 
@@ -10,6 +12,10 @@ namespace {
 
 float shifted_sigma(float u, float shift) {
     return shift * u / (1.0f + (shift - 1.0f) * u);
+}
+
+float bf16_value(float value) {
+    return ggml_bf16_to_fp32(ggml_fp32_to_bf16(value));
 }
 
 [[noreturn]] void invalid(const std::string & message,
@@ -33,9 +39,8 @@ FlowSchedule make_inference_schedule(int steps, float shift,
                 "train_timesteps", std::to_string(train_timesteps));
     }
 
-    // Match torch.linspace(1, 0, steps + 1, dtype=float32), followed by
-    // phi(u)=shift*u/(1+(shift-1)*u). Keeping this island in F32 is part of
-    // the BF16 execution contract; quantizing deltas changes the trajectory.
+    // The donor builds sigma in F32, then casts both timestep and delta to the
+    // BF16 action-latent dtype before denoising.
     FlowSchedule result;
     result.timesteps.resize(static_cast<std::size_t>(steps));
     result.deltas.resize(static_cast<std::size_t>(steps));
@@ -44,8 +49,10 @@ FlowSchedule make_inference_schedule(int steps, float shift,
         const float next_u = 1.0f - static_cast<float>(index + 1) /
             static_cast<float>(steps);
         const float next_sigma = shifted_sigma(next_u, shift);
-        result.timesteps[static_cast<std::size_t>(index)] = sigma * train_timesteps;
-        result.deltas[static_cast<std::size_t>(index)] = next_sigma - sigma;
+        result.timesteps[static_cast<std::size_t>(index)] =
+            bf16_value(sigma * train_timesteps);
+        result.deltas[static_cast<std::size_t>(index)] =
+            bf16_value(next_sigma - sigma);
         sigma = next_sigma;
     }
     return result;

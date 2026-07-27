@@ -38,6 +38,11 @@ int main(int argc, char ** argv) {
                 policy_spec->action.normalization.kind ==
                     NormalizationKind::z_score,
             "FastWAM RoboTwin normalization changed");
+    require(policy_spec->state.normalization.output_clamp_lower == -5.0F &&
+                policy_spec->state.normalization.output_clamp_upper == 5.0F &&
+                !policy_spec->action.normalization.output_clamp_lower.has_value() &&
+                !policy_spec->action.normalization.output_clamp_upper.has_value(),
+            "FastWAM RoboTwin normalization clamp changed");
     require(policy_spec->action.recovery.kind ==
                 wam::internal::policy::ActionRecoveryKind::identity,
             "FastWAM RoboTwin action recovery changed");

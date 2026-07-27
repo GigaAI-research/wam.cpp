@@ -1,0 +1,26 @@
+{
+  "execution": {
+    "action_noise_generator": "torch_cpu_f32_then_bf16_reset_each_predict",
+    "action_noise_seed": 7,
+    "binarize_gripper": true,
+    "flip_images": true,
+    "load_mode": "init",
+    "max_steps": 1200,
+    "num_steps_wait": 10,
+    "replan_steps": 10,
+    "resize_size": 224
+  },
+  "format": "wam-liberox-manifest-v1",
+  "scene_group": "LEVEL1",
+  "tasks": [
+    {
+      "bddl_file": "EXTENSION_KITCHEN_SCENE1_open_the_middle_drawer_of_the_wooden_cabinet.bddl",
+      "bddl_sha256": "b9804d0f39677503f4dab791643b02276e42a44cf84dd129c911ce1972327e90",
+      "episode_count": 10,
+      "init_count": 10,
+      "init_file": "EXTENSION_KITCHEN_SCENE1_open_the_middle_drawer_of_the_wooden_cabinet.init",
+      "init_sha256": "594071894809f3a3a43929270e25f0204b764847eafcb469192d2fbfad0dba6f",
+      "task_index": 0
+    }
+  ]
+}

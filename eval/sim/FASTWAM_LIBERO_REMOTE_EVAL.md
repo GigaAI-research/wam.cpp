@@ -99,8 +99,8 @@ python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/ru
   --suite libero_spatial \
   --task-ids 0 \
   --episodes 20 \
-  --base-seed 0 \
-  --action-noise-seed 100000 \
+  --base-seed 42 \
+  --action-noise-seed 42 \
   --replan-steps 10 \
   --num-steps-wait 30
 ```
@@ -132,9 +132,11 @@ Each completed episode and request is flushed before the next episode. To contin
 run, repeat the command with `--resume`. Resume verifies the manifest hash and model identity,
 removes orphan request records, and skips only episodes with `status=completed`.
 
-The runner sends deterministic explicit action noise with shape `[action.horizon,
-action.model_dim]`. This keeps manifest evaluation independent of the server session RNG while
-still calling `Reset` before every episode.
+The v3 runner reproduces the donor RNG contract. It seeds each task environment once with seed
+42. Every predict recreates a CPU PyTorch generator with seed 42, generates F32 noise, casts it
+to BF16 as the model does, and sends the BF16-rounded values as F32 explicit action noise with
+shape `[action.horizon, action.model_dim]`. Direct BF16 `torch.randn`, NumPy noise, an advancing
+generator, or per-episode seeds do not reproduce the donor.
 
 The two-episode runner smoke used task 0, init states 0 and 1, and manifest SHA256
 `6a5e7bbe738f89fbe6e27f99a9618f0070990b47385dbed554cc36a15f334a7f`. Both episodes
@@ -142,11 +144,12 @@ succeeded in 85 and 94 controller steps. The run produced 19 requests, server-to
 658.23 ms and median 601.50 ms. A subsequent `--resume` invocation skipped both episodes and
 preserved the same counts and summary.
 
-The frozen task-0 formal manifest has SHA256
+The earlier v1 task-0 manifest has SHA256
 `dee7258aa9ab60be52d4a62ba69a30b2ebacb36259bab66690bca44aa16a7d3a`.
 It completed `18/20` episodes successfully (`90.0%`) with 247 action-chunk requests.
 Server-total latency had mean 581.49 ms, P50 567.87 ms and P95 650.54 ms. RPC
-round-trip latency had mean 586.52 ms, P50 572.99 ms and P95 655.85 ms.
+round-trip latency had mean 586.52 ms, P50 572.99 ms and P95 655.85 ms. Its
+RNG contract is invalid for donor comparison; use the v2 result below.
 
 For a long manifest, non-overlapping ordinal ranges may run in separate output
 directories and against separate servers:
@@ -171,14 +174,41 @@ missing ranges, duplicate episodes and requests outside a shard selection.
 The merged summary includes suite-level and per-task success rates, request
 counts and latency distributions.
 
-## Formal Full-Suite Result
+## Invalidated MuJoCo 3.3.2 v2 Comparison
 
-The standard `libero_spatial`, `libero_object`, `libero_goal` and `libero_10`
-suites were evaluated with 20 fixed init states for each of their 10 tasks.
-The four frozen manifests therefore contain 800 episodes in total. Long runs
-used non-overlapping shards against four identical servers. The RPC latency
-includes concurrent-server queueing; server-total latency measures the server's
-own request execution.
+The first MuJoCo 3.3.2 comparison used the same `libero_spatial` task 0 and
+init-state indices 0 through 49 in both runtimes. The simulator environment was
+frozen to MuJoCo 3.3.2, robosuite 1.4.0, LIBERO revision
+`8f1084e3132a39270c3a13ebe37270a43ece2a01`, environment seed 42, 30 wait
+steps, 10 executed actions per replan, and a maximum of 400 action steps. Every
+predict was intended to use the donor's reset-per-request seed-42 noise. The v2 manifest SHA256 is
+`a46483a9b290afc67c8f4af02195330f0bab6d1c83cd657c7c98487cb7cc75b5`.
+
+Both the official FastWAM donor and wam.cpp completed `49/50` episodes
+successfully (`98.0%`), with init state 13 as the only failure. However, the v2
+runner generated BF16 noise directly while donor `infer_action()` generates F32
+noise and then casts it to BF16. Those tensors differ by MAE 1.154, so the
+matching rollout outcome is not numerical parity and this result is invalid for
+formal comparison. The replacement full evaluation uses the v3 contract.
+
+wam.cpp issued 428 action-chunk requests. RPC round-trip latency was
+571.88/568.39/587.97 ms mean/P50/P95; server-total latency was
+568.12/564.71/584.29 ms, and model latency was 554.82/551.30/571.14 ms.
+The 50 episode bodies took 400.36 seconds in total, with mean/P50/P95
+8.01/7.44/9.70 seconds. The official donor reported 609.82 seconds total, or
+12.20 seconds per episode, but that path also encoded and wrote one rollout
+video per episode. Treat these wall-clock totals as operational measurements,
+not a pure model-throughput comparison; the donor script does not emit
+equivalent per-request timings.
+
+## Invalidated v1 Full-Suite Result
+
+The earlier standard-suite run used v1 manifests. Those manifests incorrectly
+varied the environment seed by episode and generated advancing NumPy F32 noise.
+The donor instead fixes the environment seed at 42 per task and recreates a
+seed-42 CPU PyTorch BF16 generator for every predict. The resulting diffusion
+noise differs by MAE 1.17 on the fixed `[32,7]` input, so this run is retained
+only as an invalidated diagnostic and is not a checkpoint effectiveness result.
 
 | Suite | Manifest SHA256 | Success | Requests | Server total mean/P50/P95 (ms) | RPC mean/P50/P95 (ms) |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -187,9 +217,20 @@ own request execution.
 | `libero_goal` | `9b9370ff6507eb8633fdfddc5340408b6ffe59e4e00d65d1555d41bca71d9542` | 29/200 (14.5%) | 7,212 | 612.64 / 598.89 / 637.02 | 745.72 / 624.43 / 1154.43 |
 | `libero_10` | `2796ebab967ac1c14f21416cb6c3933272268527263fe9ccd177759ab1c7a13a` | 0/200 (0.0%) | 14,000 | 608.38 / 598.14 / 632.98 | 725.93 / 616.99 / 1141.20 |
 
-The aggregate benchmark result is `60/800` (`7.5%`). The only non-zero
+The invalidated aggregate result was `60/800` (`7.5%`). The only non-zero
 per-task results were spatial tasks 0/3/5 (`18/20`, `3/20`, `1/20`), object
 tasks 1/8 (`7/20`, `2/20`), and goal tasks 1/8 (`18/20`, `11/20`). All 10
-`libero_10` tasks scored `0/20`. No episode failed because of RPC, model
-execution, input validation or CUDA errors. The low success rate is therefore
-a model/checkpoint effectiveness result, not an integration failure.
+`libero_10` tasks scored `0/20`. It must not be used as a donor comparison or
+as evidence about model quality.
+
+The first v2 diagnostics used the current Pillow/BF16-tightened runtime. Spatial
+task 0 reached `19/20` (`95%`) with manifest SHA256
+`72765c556230694a98e47f87ac763b2aeaa73462c01b096d72263f8b0fb1f2fc`.
+Spatial task 1, which scored `0/20` under v1, reached `4/5` (`80%`) with
+manifest SHA256
+`f1b2d1f4d845ff1f3e2d93eec3038b83387a926b6f6647a84756ae343bd3a974`.
+These runs confirm the v1 RNG mismatch was causal. A new task-aligned v2
+full-suite run is still required for a formal success rate. These diagnostics
+used MuJoCo 2.3.0 and remain invalid. The donor manager uses 50 trials per task, so its full four-suite
+contract contains 2,000 episodes, not the 800 episodes used by the invalidated
+v1 run.

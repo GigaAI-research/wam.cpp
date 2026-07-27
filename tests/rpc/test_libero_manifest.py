@@ -44,21 +44,42 @@ def run():
         "libero_spatial", [0, 2], 2, 7, 1000, execution,
         {0: 50, 2: 50})
     client.validate_manifest(manifest)
-    assert [item["seed"] for item in manifest["episodes"]] == [7, 8, 9, 10]
-    assert [item["action_noise_seed"] for item in manifest["episodes"]] == [
-        1000, 1001, 1002, 1003]
+    assert manifest["execution"]["environment_seed"] == 7
+    assert manifest["execution"]["action_noise_seed"] == 1000
+    assert manifest["execution"]["action_noise_generator"] == \
+        "torch_cpu_f32_then_bf16_reset_each_predict"
+    assert set(manifest["episodes"][0]) == {
+        "episode_id", "task_id", "episode_index"}
     assert client._manifest_hash(manifest) == client._manifest_hash(manifest)
     assert manifest["episodes"][2:4][0]["episode_id"] == \
         "libero_spatial-task02-episode000"
+    client.validate_task_aligned_selection(manifest["episodes"], 0, 2)
+    client.validate_task_aligned_selection(manifest["episodes"], 2, 4)
+    try:
+        client.validate_task_aligned_selection(manifest["episodes"], 1, 4)
+    except ValueError as error:
+        assert "task boundary" in str(error)
+    else:
+        raise AssertionError("LIBERO shard must not start in the middle of a task")
 
     invalid = dict(manifest)
-    invalid["execution"] = dict(execution, explicit_action_noise=False)
+    invalid["execution"] = dict(
+        manifest["execution"], explicit_action_noise=False)
     try:
         client.validate_manifest(invalid)
     except ValueError as error:
         assert "explicit action noise" in str(error)
     else:
         raise AssertionError("manifest must require explicit action noise")
+
+    first_noise = client.donor_action_noise(42, 32, 7)
+    repeated_noise = client.donor_action_noise(42, 32, 7)
+    assert first_noise.dtype == np.float32
+    assert np.array_equal(first_noise, repeated_noise)
+    assert np.array_equal(first_noise.reshape(-1)[:8], np.asarray([
+        1.9296875, 1.484375, 0.90234375, -2.109375,
+        0.6796875, -1.234375, -0.04296875, -1.6015625,
+    ], dtype=np.float32))
 
     action = SimpleNamespace(
         fields=client.ACTION_FIELDS, real_dim=7,

@@ -28,7 +28,7 @@ ACTION_FIELDS = (
     "eef.delta.rotation.axis_angle.z", "gripper.command")
 MAX_STEPS = {"libero_spatial": 400, "libero_object": 400,
              "libero_goal": 400, "libero_10": 700, "libero_90": 700}
-MANIFEST_FORMAT = "wam-libero-manifest-v1"
+MANIFEST_FORMAT = "wam-libero-manifest-v3"
 RESULT_FORMAT = "wam-libero-eval-v1"
 LATENCY_FIELDS = (
     "rpc_roundtrip_milliseconds", "server_total_milliseconds",
@@ -113,27 +113,28 @@ def _manifest_hash(value):
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
-def build_manifest(suite_name, task_ids, episodes, base_seed,
+def build_manifest(suite_name, task_ids, episodes, environment_seed,
                    action_noise_seed, execution, available_init_states):
+    execution = dict(execution)
+    execution.update({
+        "environment_seed": int(environment_seed),
+        "action_noise_seed": int(action_noise_seed),
+        "action_noise_generator":
+            "torch_cpu_f32_then_bf16_reset_each_predict",
+    })
     entries = []
-    ordinal = 0
     for task_id in task_ids:
         count = int(available_init_states[task_id])
         if episodes > count:
             raise ValueError(
                 f"task {task_id} has {count} init states, requested {episodes}")
         for episode_index in range(episodes):
-            seed = base_seed + ordinal
-            noise_seed = action_noise_seed + ordinal
             entries.append({
                 "episode_id": (f"{suite_name}-task{task_id:02d}-"
                                f"episode{episode_index:03d}"),
                 "task_id": task_id,
                 "episode_index": episode_index,
-                "seed": seed,
-                "action_noise_seed": noise_seed,
             })
-            ordinal += 1
     return {"format": MANIFEST_FORMAT, "suite": suite_name,
             "execution": execution, "episodes": entries}
 
@@ -147,11 +148,16 @@ def validate_manifest(value):
     execution = value.get("execution")
     required_execution = {
         "replan_steps", "num_steps_wait", "max_steps", "resolution",
-        "binarize_gripper", "explicit_action_noise"}
+        "binarize_gripper", "explicit_action_noise", "environment_seed",
+        "action_noise_seed", "action_noise_generator"}
     if not isinstance(execution, dict) or set(execution) != required_execution:
-        raise ValueError("manifest execution fields do not match the v1 contract")
+        raise ValueError("manifest execution fields do not match the v2 contract")
     if not execution["explicit_action_noise"]:
         raise ValueError("fixed LIBERO manifests require explicit action noise")
+    if execution["action_noise_generator"] != \
+            "torch_cpu_f32_then_bf16_reset_each_predict":
+        raise ValueError(
+            "LIBERO donor parity requires reset-per-predict PyTorch F32-to-BF16 noise")
     if min(int(execution[name]) for name in (
             "replan_steps", "max_steps", "resolution")) <= 0:
         raise ValueError("manifest execution dimensions must be positive")
@@ -160,9 +166,10 @@ def validate_manifest(value):
     entries = value.get("episodes")
     if not isinstance(entries, list) or not entries:
         raise ValueError("manifest episodes must be a non-empty list")
-    required_entry = {
-        "episode_id", "task_id", "episode_index", "seed",
-        "action_noise_seed"}
+    if min(int(execution[name]) for name in (
+            "environment_seed", "action_noise_seed")) < 0:
+        raise ValueError("manifest seeds must be non-negative")
+    required_entry = {"episode_id", "task_id", "episode_index"}
     identifiers = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict) or set(entry) != required_entry:
@@ -174,9 +181,24 @@ def validate_manifest(value):
             raise ValueError(f"duplicate manifest episode_id: {identifier}")
         identifiers.add(identifier)
         if min(int(entry[name]) for name in (
-                "task_id", "episode_index", "seed", "action_noise_seed")) < 0:
+                "task_id", "episode_index")) < 0:
             raise ValueError(f"manifest episode {identifier} has a negative value")
     return value
+
+
+def donor_action_noise(seed, horizon, dimension):
+    import torch
+    generator = torch.Generator(device="cpu").manual_seed(int(seed))
+    return (torch.randn((int(horizon), int(dimension)), generator=generator,
+                        device="cpu", dtype=torch.float32)
+            .to(dtype=torch.bfloat16).to(dtype=torch.float32).numpy())
+
+
+def validate_task_aligned_selection(entries, start, end):
+    if start > 0 and entries[start]["task_id"] == entries[start - 1]["task_id"]:
+        raise ValueError("episode shard must start at a LIBERO task boundary")
+    if end < len(entries) and entries[end]["task_id"] == entries[end - 1]["task_id"]:
+        raise ValueError("episode shard must end at a LIBERO task boundary")
 
 
 def _distribution(values):
@@ -311,11 +333,11 @@ def parse_args(argv=None):
     parser.add_argument("--suite", choices=tuple(MAX_STEPS), default="libero_spatial")
     parser.add_argument("--task-ids", default="0")
     parser.add_argument("--episodes", type=int, default=1)
-    parser.add_argument("--base-seed", type=int, default=0)
-    parser.add_argument("--action-noise-seed", type=int, default=100000)
+    parser.add_argument("--base-seed", type=int, default=42)
+    parser.add_argument("--action-noise-seed", type=int, default=42)
     parser.add_argument("--task-id", type=int, default=0)
     parser.add_argument("--episode-index", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--replan-steps", type=int, default=10)
     parser.add_argument("--num-steps-wait", type=int, default=30)
     parser.add_argument("--max-steps", type=int)
@@ -393,6 +415,7 @@ class EpisodeRunner:
             bddl_file_name=str(bddl),
             camera_heights=int(self.execution["resolution"]),
             camera_widths=int(self.execution["resolution"]))
+        self.env.seed(int(self.execution["environment_seed"]))
 
     def run(self, entry, video_output=None):
         self._select_task(int(entry["task_id"]))
@@ -401,7 +424,6 @@ class EpisodeRunner:
             raise ValueError(
                 f"episode_index {episode_index} is unavailable for task {self.task_id}")
         self.rpc.reset()
-        self.env.seed(int(entry["seed"]))
         self.env.reset()
         observation = self.env.set_init_state(self.init_states[episode_index])
         writer = None
@@ -423,14 +445,14 @@ class EpisodeRunner:
                 if done:
                     break
             steps = 0
-            noise_rng = np.random.default_rng(int(entry["action_noise_seed"]))
             limit = int(self.execution["max_steps"])
             while not done and steps < limit:
                 images, state = observation_to_policy_observation(
                     observation, self.info.policy_spec)
-                noise = noise_rng.standard_normal(
-                    (self.info.policy_spec.action.horizon,
-                     self.info.policy_spec.action.model_dim), dtype=np.float32)
+                noise = donor_action_noise(
+                    self.execution["action_noise_seed"],
+                    self.info.policy_spec.action.horizon,
+                    self.info.policy_spec.action.model_dim)
                 request_started = time.perf_counter()
                 chunk, stats = self.rpc.predict(
                     images, state, self.task.language, noise)
@@ -504,6 +526,8 @@ def _run_manifest(args, manifest, suite, get_libero_path, env_type):
                    else args.episode_end)
     if episode_end > len(manifest["episodes"]):
         raise ValueError("episode range exceeds the manifest")
+    validate_task_aligned_selection(
+        manifest["episodes"], args.episode_start, episode_end)
     selection = {"episode_start": args.episode_start,
                  "episode_end": episode_end}
     selected_entries = manifest["episodes"][args.episode_start:episode_end]
@@ -602,8 +626,13 @@ def _run_single(args, suite, get_libero_path, env_type):
         "episode_id": (f"{args.suite}-task{args.task_id:02d}-"
                        f"episode{args.episode_index:03d}"),
         "task_id": args.task_id, "episode_index": args.episode_index,
-        "seed": args.seed, "action_noise_seed": args.action_noise_seed,
     }
+    execution.update({
+        "environment_seed": args.seed,
+        "action_noise_seed": args.action_noise_seed,
+        "action_noise_generator":
+            "torch_cpu_f32_then_bf16_reset_each_predict",
+    })
     rpc = RpcClient(args.host, args.port, args.descriptor, "libero")
     runner = None
     try:

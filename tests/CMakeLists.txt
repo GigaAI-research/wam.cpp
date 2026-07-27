@@ -376,4 +376,10 @@ if(WAM_BUILD_SERVING AND TARGET wam_proto_descriptor)
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_liberox_adapter.py)
     set_tests_properties(wam_liberox_adapter PROPERTIES
         ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+
+    add_test(NAME wam_liberox_manifest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_liberox_manifest.py)
+    set_tests_properties(wam_liberox_manifest PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
 endif()

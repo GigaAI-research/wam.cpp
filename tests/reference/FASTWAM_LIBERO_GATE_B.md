@@ -22,16 +22,17 @@ private FastWAM mathematics and numerical oracle only. The 0.5 target must:
    marked complete.
 
 Gate B passes for the selected profile. The schema-v2 target contains 1741 tensors and uses
-separate `fastwam.norm_eps=1e-6` model metadata and `1e-8` policy normalization epsilon. Its
-public CUDA/BF16 `Model/Session` output is bit-identical to the donor C++ `[32, 7]` action. Both
-compare to the independent PyTorch reference at MAE `0.0009015057502048356` and maximum absolute
-error `0.0054931640625`, within the frozen `0.001/0.01` thresholds.
+separate `fastwam.norm_eps=1e-6` model metadata and `1e-8` policy normalization epsilon. The
+public CUDA/BF16 `Model/Session` output compares to the independent PyTorch reference at MAE
+`0.00085519999` and maximum absolute error `0.003662109375`, within the tightened
+`0.0009/0.005` thresholds.
 
-Some donor video K/V tensors and the final two velocity steps exceed the donor's stricter
-intermediate threshold against PyTorch. Because the migrated runtime is bit-identical at the
-final donor boundary, this is recorded as a pre-existing BF16/CUDA donor-reference limitation,
-not a migration regression. Kernel or dependency changes must rerun the fixed fixture and may
-not relax the final action thresholds.
+Some video K/V tensors and the final two velocity steps still exceed the donor's stricter
+intermediate threshold against PyTorch. The old frozen C++ output is no longer treated as the
+oracle because it encoded an F32 scheduler/update mismatch. Timesteps and deltas now follow the
+donor BF16 dtype, and multiply/add use donor-equivalent BF16 rounding boundaries. Kernel or
+dependency changes must rerun the independent Python fixture and may not relax the final action
+thresholds.
 
 The same public session gate covers explicit noise, session-generated noise, RNG advancement,
 and exact RNG replay after `session_reset()`. Each public session owns an architecture-private

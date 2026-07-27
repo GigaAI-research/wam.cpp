@@ -570,4 +570,6 @@ server 做权威 PolicySpec/EnvironmentContract compatibility check；client 持
 
 ## 18. 下一步
 
-Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。LIBERO spatial task 0 的固定 20-episode 结果为 `18/20`。标准四组 LIBERO suite 的 800 个固定 episodes 已全部完成并严格合并：spatial `22/200`、object `9/200`、goal `29/200`、LIBERO-10 `0/200`，总计 `60/800`；无 RPC/runtime failure，低成功率属于 checkpoint 效果。FastWAM RoboTwin 3-camera/14D/z-score profile、真实 GGUF artifact gate，以及 LIBERO-X environment adapter 和单任务纵向 smoke 已完成。下一步先冻结本 checkpoint；随后在投入大规模 RoboTwin/LIBERO-X benchmark 前，核对 FastWAM checkpoint 的预期训练 task 范围和 donor Python baseline，解释当前跨 task 成功率差异。
+Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。原 LIBERO v1 runner 使用逐 episode 变化的环境 seed 和 advancing NumPy F32 noise，v2 runner 又错误地使用 direct BF16 `torch.randn`；两者都不符合 donor 每次 predict 执行 `torch.randn(F32) -> BF16` 的固定 seed 42 契约，已有 LIBERO rollout 结果均不能作为正式 parity。MuJoCo 3.3.2 的完整 v3 对照正在按四个 suite、每 task 50 trials 重跑，并保留逐 init-state 成败集合。
+
+FastWAM RoboTwin 3-camera/14D/z-score profile、真实 GGUF artifact gate，以及专用 LIBERO-X z-score artifact、environment adapter、同输入 action Gate 和固定 manifest runner 已完成。LIBERO-X LEVEL1 上游自然顺序 task 0 的 10 个 init states 使用 manifest `458b441e34d2566333430db97848b537e4967a32cea7f2889486a80f7897e5c1` 完成 donor/wam.cpp 对照：两者均为 `0/10`，逐状态判定 `10/10` 一致；donor/wam rollout 分别为 `1223.51/883.79 s`。下一步不是放宽数值容差，而是先审计该 checkpoint 对应训练分布和任务覆盖，再用同一 runner 扩展到多个 LEVEL1 tasks；同时等待正在运行的 LIBERO v3 全 suite 对照完成并汇总。

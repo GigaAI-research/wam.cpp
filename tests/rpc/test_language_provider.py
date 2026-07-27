@@ -11,7 +11,8 @@ from types import MethodType
 import numpy as np
 
 from common.language import (
-    PreparedLanguage, WanUmt5EmbeddingProvider, create_language_provider)
+    PreparedLanguage, WanUmt5EmbeddingProvider, _apply_wan_prompt_padding,
+    create_language_provider)
 
 
 def metadata():
@@ -48,6 +49,29 @@ def fake_provider():
 
 
 def run():
+    # Donor FastWAM zeroes the right-padded embedding rows, then deliberately
+    # exposes every embedding row to the downstream model with an all-one mask.
+    values = np.arange(18, dtype=np.uint16).reshape(6, 3) + 1
+    mask = np.asarray([1, 1, 1, 0, 0, 0], dtype=np.int64)
+    original_values = values.copy()
+    original_mask = mask.copy()
+    padded, model_mask = _apply_wan_prompt_padding(values, mask)
+    donor_reference = original_values.copy()
+    donor_reference[3:] = 0
+    assert np.array_equal(padded, donor_reference)
+    assert padded.dtype == np.uint16 and padded.flags.c_contiguous
+    assert np.array_equal(model_mask, np.ones(6, dtype=np.int32))
+    assert model_mask.dtype == np.int32 and model_mask.flags.c_contiguous
+    assert np.array_equal(values, original_values)
+    assert np.array_equal(mask, original_mask)
+
+    try:
+        _apply_wan_prompt_padding(values, np.asarray([1, 0, 1, 0, 0, 0]))
+    except ValueError as error:
+        assert "right padding" in str(error)
+    else:
+        raise AssertionError("Wan prompt padding must reject a non-prefix mask")
+
     provider = fake_provider()
     first = provider.prepare("pick up bowl")
     repeated = provider.prepare("pick up bowl")

@@ -37,15 +37,14 @@ std::size_t image_index(const CpuImage & image, std::uint32_t x,
                image.width + x;
 }
 
-float source_value(const ImageView & image, std::uint32_t x,
-                   std::uint32_t y, std::uint32_t channel) {
+std::uint8_t source_value(const ImageView & image, std::uint32_t x,
+                          std::uint32_t y, std::uint32_t channel) {
     const std::size_t packed_stride =
         static_cast<std::size_t>(image.width) * image.channels;
     const std::size_t stride = image.row_stride_bytes == 0
         ? packed_stride : image.row_stride_bytes;
     return image.data[static_cast<std::size_t>(y) * stride +
-                      static_cast<std::size_t>(x) * image.channels + channel] *
-        (1.0F / 255.0F);
+                      static_cast<std::size_t>(x) * image.channels + channel];
 }
 
 float output_range(float value, PixelRange range) {
@@ -71,21 +70,21 @@ std::uint32_t round_ties_to_even(float value) {
 
 struct AxisSample {
     std::vector<std::uint32_t> indices;
-    std::vector<float> weights;
+    std::vector<std::int32_t> weights;
 };
 
-float cubic_weight(float value) {
-    constexpr float a = -0.5F;
-    const float x = std::abs(value);
-    if (x < 1.0F) {
-        return (a + 2.0F) * x * x * x -
-               (a + 3.0F) * x * x + 1.0F;
+double cubic_weight(double value) {
+    constexpr double a = -0.5;
+    const double x = std::abs(value);
+    if (x < 1.0) {
+        return (a + 2.0) * x * x * x -
+               (a + 3.0) * x * x + 1.0;
     }
-    if (x < 2.0F) {
-        return a * x * x * x - 5.0F * a * x * x +
-               8.0F * a * x - 4.0F * a;
+    if (x < 2.0) {
+        return a * x * x * x - 5.0 * a * x * x +
+               8.0 * a * x - 4.0 * a;
     }
-    return 0.0F;
+    return 0.0;
 }
 
 AxisSample build_axis_sample(std::uint32_t output_position,
@@ -94,46 +93,67 @@ AxisSample build_axis_sample(std::uint32_t output_position,
                              InterpolationMode interpolation,
                              bool antialias,
                              ResampleBoundaryMode boundary) {
-    const float scale = static_cast<float>(resized_size) / source_size;
-    const float center = (output_position + 0.5F) / scale - 0.5F;
+    constexpr std::int32_t coefficient_scale = 1 << 22;
+    const double scale = static_cast<double>(resized_size) / source_size;
+    const double center = (output_position + 0.5) / scale - 0.5;
     AxisSample sample;
     if (interpolation == InterpolationMode::nearest) {
         const int index = static_cast<int>(std::floor(center + 0.5F));
         sample.indices.push_back(static_cast<std::uint32_t>(
             std::max(0, std::min(static_cast<int>(source_size) - 1, index))));
-        sample.weights.push_back(1.0F);
+        sample.weights.push_back(coefficient_scale);
         return sample;
     }
 
-    const float base_radius = interpolation == InterpolationMode::bicubic
-        ? 2.0F : 1.0F;
-    const float filter_scale = antialias
-        ? std::max(1.0F, 1.0F / scale) : 1.0F;
-    const float radius = base_radius * filter_scale;
+    const double base_radius = interpolation == InterpolationMode::bicubic
+        ? 2.0 : 1.0;
+    const double filter_scale = antialias
+        ? std::max(1.0, 1.0 / scale) : 1.0;
+    const double radius = base_radius * filter_scale;
     const int first = static_cast<int>(std::ceil(center - radius));
     const int last = static_cast<int>(std::floor(center + radius));
-    float total = 0.0F;
+    std::vector<double> weights;
+    double total = 0.0;
     for (int index = first; index <= last; ++index) {
-        const float distance = (index - center) / filter_scale;
-        const float weight = interpolation == InterpolationMode::bicubic
+        const double distance = (index - center) / filter_scale;
+        const double weight = interpolation == InterpolationMode::bicubic
             ? cubic_weight(distance)
-            : std::max(0.0F, 1.0F - std::abs(distance));
-        if (weight == 0.0F) continue;
+            : std::max(0.0, 1.0 - std::abs(distance));
+        if (weight == 0.0) continue;
         if (boundary == ResampleBoundaryMode::truncate &&
             (index < 0 || index >= static_cast<int>(source_size))) {
             continue;
         }
         sample.indices.push_back(static_cast<std::uint32_t>(
             std::max(0, std::min(static_cast<int>(source_size) - 1, index))));
-        sample.weights.push_back(weight);
+        weights.push_back(weight);
         total += weight;
     }
-    if (sample.indices.empty() || total == 0.0F) {
+    if (sample.indices.empty() || total == 0.0) {
         invalid("image interpolation produced an empty sample", "images",
                 "invalid resize geometry");
     }
-    for (float & weight : sample.weights) weight /= total;
+    sample.weights.reserve(weights.size());
+    for (const double weight : weights) {
+        const double scaled = weight / total * coefficient_scale;
+        sample.weights.push_back(static_cast<std::int32_t>(
+            scaled < 0.0 ? scaled - 0.5 : scaled + 0.5));
+    }
     return sample;
+}
+
+std::uint8_t resample_u8(const std::uint8_t * values,
+                         const AxisSample & sample,
+                         std::size_t stride) {
+    constexpr int precision_bits = 22;
+    std::int64_t sum = std::int64_t{1} << (precision_bits - 1);
+    for (std::size_t i = 0; i < sample.indices.size(); ++i) {
+        sum += static_cast<std::int64_t>(values[sample.indices[i] * stride]) *
+               sample.weights[i];
+    }
+    const std::int64_t rounded = sum >> precision_bits;
+    return static_cast<std::uint8_t>(
+        std::max<std::int64_t>(0, std::min<std::int64_t>(255, rounded)));
 }
 
 void validate_rgb_image(const ImageView & image) {
@@ -279,18 +299,19 @@ CpuImage transform_image_reference(const ImageView & image,
                                      spec.resample_boundary);
     }
 
-    std::vector<float> horizontal(image_elements(
+    std::vector<std::uint8_t> horizontal(image_elements(
         transform.target_width, image.height, 3, "images." + image.name));
+    std::vector<std::uint8_t> row(image.width);
     for (std::uint32_t y = 0; y < image.height; ++y) {
-        for (std::uint32_t x = 0; x < transform.target_width; ++x) {
-            for (std::uint32_t channel = 0; channel < 3; ++channel) {
-                float value = 0.0F;
-                for (std::size_t i = 0; i < x_plan[x].indices.size(); ++i) {
-                    value += source_value(image, x_plan[x].indices[i], y,
-                                          channel) * x_plan[x].weights[i];
-                }
+        for (std::uint32_t channel = 0; channel < 3; ++channel) {
+            for (std::uint32_t source_x = 0; source_x < image.width;
+                 ++source_x) {
+                row[source_x] = source_value(image, source_x, y, channel);
+            }
+            for (std::uint32_t x = 0; x < transform.target_width; ++x) {
                 horizontal[(static_cast<std::size_t>(y) *
-                            transform.target_width + x) * 3 + channel] = value;
+                            transform.target_width + x) * 3 + channel] =
+                    resample_u8(row.data(), x_plan[x], 1);
             }
         }
     }
@@ -306,15 +327,12 @@ CpuImage transform_image_reference(const ImageView & image,
     for (std::uint32_t y = 0; y < output.height; ++y) {
         for (std::uint32_t x = 0; x < output.width; ++x) {
             for (std::uint32_t channel = 0; channel < 3; ++channel) {
-                float value = 0.0F;
-                for (std::size_t i = 0; i < y_plan[y].indices.size(); ++i) {
-                    const std::size_t index =
-                        (static_cast<std::size_t>(y_plan[y].indices[i]) *
-                         output.width + x) * 3 + channel;
-                    value += horizontal[index] * y_plan[y].weights[i];
-                }
+                const std::uint8_t value = resample_u8(
+                    horizontal.data() +
+                        (static_cast<std::size_t>(x) * 3 + channel),
+                    y_plan[y], static_cast<std::size_t>(output.width) * 3);
                 output.pixels[image_index(output, x, y, channel)] =
-                    output_range(value, spec.pixel_range);
+                    output_range(value * (1.0F / 255.0F), spec.pixel_range);
             }
         }
     }

@@ -32,6 +32,26 @@ def _prompt(spec, instruction):
     return spec["prompt_template"].replace("{task}", instruction)
 
 
+def _apply_wan_prompt_padding(values, attention_mask):
+    """Match FastWAM's prompt-embedding contract after UMT5 encoding."""
+    values = np.asarray(values)
+    attention_mask = np.asarray(attention_mask)
+    if values.ndim != 2 or attention_mask.ndim != 1:
+        raise ValueError("Wan prompt values/mask must be rank 2/rank 1")
+    if values.shape[0] != attention_mask.shape[0]:
+        raise ValueError("Wan prompt values and mask sequence lengths differ")
+    if np.any((attention_mask != 0) & (attention_mask != 1)):
+        raise ValueError("Wan prompt attention mask must be binary")
+    if np.any(attention_mask[1:] > attention_mask[:-1]):
+        raise ValueError("Wan prompt attention mask must use right padding")
+
+    valid_tokens = int(np.sum(attention_mask, dtype=np.int64))
+    padded_values = np.ascontiguousarray(values.copy())
+    padded_values[valid_tokens:] = 0
+    model_mask = np.ones(attention_mask.shape, dtype=np.int32)
+    return padded_values, model_mask
+
+
 class TokenLanguageProvider:
     def __init__(self, metadata, tokenizer_path):
         if metadata["language_mode"] != "tokens":
@@ -113,6 +133,7 @@ class WanUmt5EmbeddingProvider:
         values = (context[0].detach().to(device="cpu", dtype=torch.bfloat16)
                   .contiguous().view(torch.uint16).numpy().copy())
         attention_mask = mask[0].to(dtype=torch.int32).contiguous().numpy().copy()
+        values, attention_mask = _apply_wan_prompt_padding(values, attention_mask)
         return PreparedLanguage(values, attention_mask, preprocess_ms, model_ms)
 
     def prepare(self, instruction):

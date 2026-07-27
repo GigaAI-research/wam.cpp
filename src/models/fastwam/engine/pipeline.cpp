@@ -9,6 +9,7 @@
 #include "ggml.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -51,7 +52,12 @@ std::vector<float> vae_pixels(const policy::CpuImage & image,
                                 image.width + x * 2 + x_offset;
                         const std::size_t target = output_channel * output_plane +
                             static_cast<std::size_t>(y) * output_width + x;
-                        result[target] = image.pixels[source];
+                        const float pixel = image.pixels[source];
+                        const float u8 = std::round((pixel + 1.0F) * 127.5F);
+                        const ggml_bf16_t scaled = ggml_fp32_to_bf16(
+                            u8 * (2.0F / 255.0F));
+                        result[target] = ggml_bf16_to_fp32(ggml_fp32_to_bf16(
+                            ggml_bf16_to_fp32(scaled) - 1.0F));
                     }
                 }
             }
@@ -180,13 +186,13 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
             ? "0" + std::to_string(step + 1)
             : std::to_string(step + 1);
         debug::dump("action_velocity_" + step_name, velocity, action_shape);
-        ggml_bf16_to_fp32_row(action.data(), action_f32.data(),
-                              static_cast<std::int64_t>(action.size()));
-        for (std::size_t index = 0; index < action_f32.size(); ++index) {
-            action_f32[index] += velocity[index] * schedule.deltas[step];
+        for (std::size_t index = 0; index < action.size(); ++index) {
+            const ggml_bf16_t product = ggml_fp32_to_bf16(
+                velocity[index] * schedule.deltas[step]);
+            action_f32[index] = ggml_bf16_to_fp32(action[index]) +
+                ggml_bf16_to_fp32(product);
+            action[index] = ggml_fp32_to_bf16(action_f32[index]);
         }
-        ggml_fp32_to_bf16_row(action_f32.data(), action.data(),
-                              static_cast<std::int64_t>(action.size()));
         debug::dump("action_state_" + step_name, action, action_shape);
     }
     result.stats.model_decode_milliseconds = elapsed_ms(phase_begin);

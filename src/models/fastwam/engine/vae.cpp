@@ -241,16 +241,19 @@ std::vector<ggml_bf16_t> encode_first_frame(
     std::vector<float> moments(static_cast<std::size_t>(96) * plane);
     ggml_backend_tensor_get(output, moments.data(), 0,
                             moments.size() * sizeof(float));
-    std::vector<float> normalized(static_cast<std::size_t>(48) * plane);
+    std::vector<ggml_bf16_t> result(static_cast<std::size_t>(48) * plane);
     for (std::size_t channel = 0; channel < 48; ++channel) {
+        const float mean = ggml_bf16_to_fp32(
+            ggml_fp32_to_bf16(kMean[channel]));
+        const float inverse_std = ggml_bf16_to_fp32(
+            ggml_fp32_to_bf16(1.0F / kStd[channel]));
         for (std::size_t index = 0; index < plane; ++index) {
-            normalized[channel * plane + index] =
-                (moments[channel * plane + index] - kMean[channel]) / kStd[channel];
+            const std::size_t offset = channel * plane + index;
+            const float centered = ggml_bf16_to_fp32(ggml_fp32_to_bf16(
+                moments[offset] - mean));
+            result[offset] = ggml_fp32_to_bf16(centered * inverse_std);
         }
     }
-    std::vector<ggml_bf16_t> result(normalized.size());
-    ggml_fp32_to_bf16_row(normalized.data(), result.data(),
-                          static_cast<std::int64_t>(normalized.size()));
     ggml_gallocr_free(allocator);
     ggml_free(ctx);
     return result;
