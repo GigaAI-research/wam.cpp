@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -126,10 +127,26 @@ namespace wam::internal::fastwam::engine {
 class Engine final {
 public:
     std::unique_ptr<fastwam::Engine> runtime;
+    const ArtifactContract * artifact = nullptr;
     EngineInfo info;
+    std::mutex execution_mutex;
+};
+
+class EngineSession final {
+public:
+    explicit EngineSession(Engine & owner) : owner_(&owner) {}
+
+private:
+    friend CoreAction predict(EngineSession &, const PreparedInputs &);
+    friend void reset(EngineSession &);
+
+    Engine * owner_ = nullptr;
 };
 
 void EngineDeleter::operator()(Engine * value) const noexcept { delete value; }
+void EngineSessionDeleter::operator()(EngineSession * value) const noexcept {
+    delete value;
+}
 
 EnginePtr create_engine(const ArtifactContract & artifact,
                         const EngineOptions & options) {
@@ -153,17 +170,40 @@ EnginePtr create_engine(const ArtifactContract & artifact,
     result->info.backend = Backend::cuda;
     result->info.compute_precision = ComputePrecision::bf16;
     result->info.resident_device_bytes = runtime->resident_device_bytes;
+    result->info.peak_component_device_bytes = runtime->resident_device_bytes;
     result->info.runtime_components = runtime->runtime_components;
+    result->artifact = &artifact;
     result->runtime = std::move(runtime);
     return result;
 }
 
-CoreAction predict(Engine & engine, const ArtifactContract & artifact,
-                   const PreparedInputs & inputs) {
-    return run_pipeline(*engine.runtime, artifact, inputs);
+EngineSessionPtr create_engine_session(
+    Engine & instance, const EngineSessionOptions &) {
+    if (!instance.runtime || instance.artifact == nullptr) {
+        throw Error(ErrorCode::failed_precondition,
+                    "FastWAM engine has no model resources");
+    }
+    return EngineSessionPtr(new EngineSession(instance));
 }
 
-void reset(Engine &) {}
+CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
+    if (session.owner_ == nullptr || !session.owner_->runtime ||
+        session.owner_->artifact == nullptr) {
+        throw Error(ErrorCode::failed_precondition,
+                    "FastWAM engine session is not initialized");
+    }
+    Engine & engine = *session.owner_;
+    std::lock_guard<std::mutex> lock(engine.execution_mutex);
+    return run_pipeline(*engine.runtime, *engine.artifact, inputs);
+}
+
+void reset(EngineSession & session) {
+    if (session.owner_ == nullptr) {
+        throw Error(ErrorCode::failed_precondition,
+                    "FastWAM engine session is not initialized");
+    }
+    std::lock_guard<std::mutex> lock(session.owner_->execution_mutex);
+}
 
 const EngineInfo & engine_info(const Engine & engine) noexcept {
     return engine.info;

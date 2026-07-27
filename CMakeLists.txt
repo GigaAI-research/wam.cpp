@@ -69,6 +69,7 @@ add_library(wam_core STATIC
     src/policy/action_ops.cpp
     src/policy/image_ops.cpp
     src/policy/language_ops.cpp
+    src/policy/observation_ops.cpp
     src/policy/policy_spec.cpp
     src/policy/state_ops.cpp
 )

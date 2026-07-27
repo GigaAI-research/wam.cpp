@@ -2,6 +2,7 @@
 
 #include "models/gwp05/artifact.h"
 #include "models/gwp05/inputs.h"
+#include "models/common/model_types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -60,13 +61,7 @@ struct EngineSessionOptions {
     bool enable_prefix_cache = true;
 };
 
-struct EngineInfo {
-    Backend backend = Backend::automatic;
-    ComputePrecision compute_precision = ComputePrecision::unknown;
-    std::uint64_t resident_device_bytes = 0;
-    std::uint64_t peak_component_device_bytes = 0;
-    std::vector<RuntimeComponentInfo> runtime_components;
-};
+using EngineInfo = model_common::EngineInfo;
 
 KernelDispatch resolve_kernel_dispatch(
     ComputePrecision precision, Backend backend,

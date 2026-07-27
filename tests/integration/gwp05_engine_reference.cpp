@@ -185,8 +185,7 @@ int main(int argc, char ** argv) {
         engine::create_engine_session(*engine_model, session_options);
     const gwp05::CoreAction action =
         engine::predict(*engine_session, prepared);
-    wam::test::require(action.horizon == 48 && action.model_action_dim == 32 &&
-                           action.values.size() == 48 * 32,
+    wam::test::require(action.values.size() == 48 * 32,
                        "core action shape changed");
 
     const std::vector<std::string> intermediate = {
@@ -242,7 +241,7 @@ int main(int argc, char ** argv) {
     repeat_mean /= action.values.size();
     wam::test::require(repeat_mean <= 1.0e-3 && repeat_max <= 1.0e-3,
                        "reset repeat exceeds the frozen F32 action tolerance");
-    wam::test::require(prepared.action_noise == noise,
+    wam::test::require(prepared.observation.action_noise == noise,
                        "engine modified explicit action noise");
 
     engine_session.reset();

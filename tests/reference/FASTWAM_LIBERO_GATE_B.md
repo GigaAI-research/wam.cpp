@@ -34,8 +34,10 @@ not a migration regression. Kernel or dependency changes must rerun the fixed fi
 not relax the final action thresholds.
 
 The same public session gate covers explicit noise, session-generated noise, RNG advancement,
-and exact RNG replay after `session_reset()`. Multiple sessions share a model-owned engine lock;
-`concurrent_sessions=false` remains the advertised scheduling capability.
+and exact RNG replay after `session_reset()`. Each public session owns an architecture-private
+engine session. The model-owned execution lock covers only FastWAM compute, while preprocessing
+and postprocessing remain session-local; `concurrent_sessions=false` remains the advertised
+scheduling capability because backend execution is still serialized.
 
 The serving extension of Gate B also passes. RPC continues to carry a raw instruction; the
 Python server owns the exact Wan UMT5 tokenizer/encoder used by FastWAM preprocessing and passes

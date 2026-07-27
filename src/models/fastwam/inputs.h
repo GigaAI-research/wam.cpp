@@ -1,7 +1,8 @@
 #pragma once
 
 #include "models/fastwam/artifact.h"
-#include "policy/image_ops.h"
+#include "models/common/model_types.h"
+#include "policy/observation_ops.h"
 #include "wam/types.h"
 
 #include <random>
@@ -10,18 +11,12 @@
 namespace wam::internal::fastwam {
 
 struct PreparedInputs {
-    policy::CpuImage composite_image;
-    std::vector<float> raw_state;
-    std::vector<float> model_state;
+    policy::PreparedObservation observation;
     Tensor embedding;
     std::vector<std::int32_t> embedding_attention_mask;
-    std::vector<float> action_noise;
 };
 
-struct CoreAction {
-    std::vector<float> values;
-    Stats stats;
-};
+using CoreAction = model_common::CoreAction;
 
 PreparedInputs prepare_inputs(const Inputs & inputs,
                               const ArtifactContract & artifact,

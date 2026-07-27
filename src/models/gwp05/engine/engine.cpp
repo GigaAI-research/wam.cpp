@@ -95,9 +95,9 @@ Stats public_stats(const Gwp05ModelArch & engine) {
     return output;
 }
 
-std::unique_ptr<Gwp05ModelArch> make_session_state(
-    const Gwp05ModelArch & resources) {
-    auto state = std::make_unique<Gwp05ModelArch>();
+std::unique_ptr<EngineSessionState> make_session_state(
+    const EngineResources & resources) {
+    auto state = std::make_unique<EngineSessionState>();
     state->cfg = resources.cfg;
     state->runtime_components = resources.runtime_components;
     state->language_mode = resources.language_mode;
@@ -126,7 +126,6 @@ std::unique_ptr<Gwp05ModelArch> make_session_state(
     state->t5_max_length = resources.t5_max_length;
     state->vae_latents_mean = resources.vae_latents_mean;
     state->vae_latents_std = resources.vae_latents_std;
-    state->owns_model_resources = false;
     return state;
 }
 
@@ -220,7 +219,7 @@ EnginePtr create_engine(const ArtifactContract & artifact,
         throw Error(ErrorCode::internal,
                     "GWP artifact has no backing reader");
     }
-    auto model = std::make_unique<Gwp05ModelArch>();
+    auto model = std::make_unique<EngineResources>();
     model->backend_request = options.backend;
     model->device_index = options.device_index;
     model->prompt_cache_limit = options.prompt_cache_capacity;
@@ -607,26 +606,26 @@ CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
     const std::size_t noise_values =
         static_cast<std::size_t>(instance.cfg.action_chunk) *
         static_cast<std::size_t>(instance.cfg.max_action_dim);
-    if (inputs.composite_image.width !=
+    if (inputs.observation.composite_image.width !=
             static_cast<std::uint32_t>(instance.cfg.image_width) ||
-        inputs.composite_image.height !=
+        inputs.observation.composite_image.height !=
             static_cast<std::uint32_t>(instance.cfg.image_height) ||
-        inputs.composite_image.channels != 3 ||
-        inputs.composite_image.layout != policy::TensorLayout::chw ||
-        inputs.composite_image.pixels.size() != image_values ||
-        inputs.model_state.size() !=
+        inputs.observation.composite_image.channels != 3 ||
+        inputs.observation.composite_image.layout != policy::TensorLayout::chw ||
+        inputs.observation.composite_image.pixels.size() != image_values ||
+        inputs.observation.model_state.size() !=
             static_cast<std::size_t>(instance.cfg.max_state_dim) ||
-        inputs.action_noise.size() != noise_values) {
+        inputs.observation.action_noise.size() != noise_values) {
         throw Error(ErrorCode::invalid_argument,
                     "prepared GWP engine input contract is invalid");
     }
     std::vector<float> prompt_embedding;
     EngineInputsView view;
-    view.composite_image = inputs.composite_image.pixels.data();
+    view.composite_image = inputs.observation.composite_image.pixels.data();
     view.composite_image_n = static_cast<int>(
-        inputs.composite_image.pixels.size());
-    view.model_state = inputs.model_state.data();
-    view.action_noise = inputs.action_noise.data();
+        inputs.observation.composite_image.pixels.size());
+    view.model_state = inputs.observation.model_state.data();
+    view.action_noise = inputs.observation.action_noise.data();
     view.enable_prefix_cache =
         inputs.enable_prefix_cache && session.enable_prefix_cache_;
     if (inputs.language_mode == LanguageRuntimeMode::external_embedding) {
@@ -652,10 +651,6 @@ CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
         throw Error(ErrorCode::inference_failed,
                     "GWP engine inference failed");
     }
-    output.horizon =
-        static_cast<std::uint32_t>(instance.cfg.action_chunk);
-    output.model_action_dim =
-        static_cast<std::uint32_t>(instance.cfg.max_action_dim);
     output.stats = public_stats(instance);
     return output;
 }

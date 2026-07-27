@@ -141,12 +141,17 @@ int main(int argc, char ** argv) {
     const wam::Prediction second_random = wam::predict(session, inputs);
     require(first_random.action.data != second_random.action.data,
             "FastWAM session RNG did not advance between predictions");
+    wam::Session * peer_session = wam::session_create(model, session_options);
+    const wam::Prediction peer_random = wam::predict(peer_session, inputs);
+    require(first_random.action.data == peer_random.action.data,
+            "FastWAM engine sessions do not own independent RNG state");
     require(static_cast<bool>(wam::session_reset(session)),
             "FastWAM session reset failed");
     const wam::Prediction reset_random = wam::predict(session, inputs);
     require(first_random.action.data == reset_random.action.data,
             "FastWAM session reset did not restore its random noise sequence");
 
+    wam::session_free(peer_session);
     wam::session_free(session);
     wam::model_free(model);
     return 0;

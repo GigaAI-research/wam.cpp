@@ -524,11 +524,18 @@ Gwp05ModelArch::~Gwp05ModelArch() {
     prefix_graph.reset();
     prefix_storage.reset();
     vae_graph.reset();
-    if (!owns_model_resources) {
-        backend = nullptr;
-        weights.clear();
-        return;
-    }
+    backend = nullptr;
+    weights.clear();
+}
+
+EngineResources::~EngineResources() {
+    mot_graph.reset();
+    unrolled_action_graph.reset();
+    cached_action_graph.reset();
+    prompt_projection_graph.reset();
+    prefix_graph.reset();
+    prefix_storage.reset();
+    vae_graph.reset();
     for (ggml_backend_buffer_t & buffer : weight_buffers) {
         if (buffer != nullptr) {
             ggml_backend_buffer_free(buffer);
@@ -543,6 +550,7 @@ Gwp05ModelArch::~Gwp05ModelArch() {
     }
     if (backend != nullptr) {
         ggml_backend_free(backend);
+        backend = nullptr;
     }
 }
 

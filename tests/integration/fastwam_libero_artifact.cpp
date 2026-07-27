@@ -73,12 +73,12 @@ int main(int argc, char ** argv) {
     const auto prepared = wam::internal::fastwam::prepare_inputs(
         inputs, *artifact, *policy_spec,
         wam::LanguageRuntimeMode::external_embedding, rng);
-    require(prepared.composite_image.width == 448 &&
-                prepared.composite_image.height == 224 &&
-                prepared.model_state.size() == 8 &&
+    require(prepared.observation.composite_image.width == 448 &&
+                prepared.observation.composite_image.height == 224 &&
+                prepared.observation.model_state.size() == 8 &&
                 prepared.embedding.shape ==
                     std::vector<std::int64_t>({2, 4096}) &&
-                prepared.action_noise == noise,
+                prepared.observation.action_noise == noise,
             "FastWAM common policy input boundary changed");
     wam::test::require_error(
         [&] {

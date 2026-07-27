@@ -280,7 +280,7 @@ enum class LoadState {
     failed,
 };
 
-struct Gwp05ModelArch final {
+struct Gwp05ModelArch {
     Gwp05ModelArch() = default;
     ~Gwp05ModelArch();
 
@@ -333,8 +333,6 @@ struct Gwp05ModelArch final {
 
     std::vector<float> vae_latents_mean;
     std::vector<float> vae_latents_std;
-    bool owns_model_resources = true;
-
     std::vector<int32_t> prompt_mask(const EngineInputsView & in) const {
         if (in.attention_mask && in.attention_mask_n == in.n_lang) {
             return {in.attention_mask, in.attention_mask + in.n_lang};
@@ -387,9 +385,15 @@ struct Gwp05ModelArch final {
     }
 };
 
+struct EngineResources final : Gwp05ModelArch {
+    ~EngineResources();
+};
+
+struct EngineSessionState final : Gwp05ModelArch {};
+
 class Engine final {
 public:
-    explicit Engine(std::unique_ptr<Gwp05ModelArch> resources,
+    explicit Engine(std::unique_ptr<EngineResources> resources,
                     EngineInfo info)
         : resources_(std::move(resources)), info_(std::move(info)) {}
 
@@ -401,14 +405,14 @@ private:
     friend const EngineInfo & engine_info(const Engine &) noexcept;
     friend class EngineSession;
 
-    std::unique_ptr<Gwp05ModelArch> resources_;
+    std::unique_ptr<EngineResources> resources_;
     EngineInfo info_;
     std::mutex execution_mutex_;
 };
 
 class EngineSession final {
 public:
-    EngineSession(Engine & owner, std::unique_ptr<Gwp05ModelArch> state,
+    EngineSession(Engine & owner, std::unique_ptr<EngineSessionState> state,
                   bool enable_prefix_cache)
         : owner_(&owner), state_(std::move(state)),
           enable_prefix_cache_(enable_prefix_cache) {}
@@ -418,7 +422,7 @@ private:
     friend void reset(EngineSession &);
 
     Engine * owner_ = nullptr;
-    std::unique_ptr<Gwp05ModelArch> state_;
+    std::unique_ptr<EngineSessionState> state_;
     bool enable_prefix_cache_ = true;
 };
 

@@ -67,15 +67,10 @@ Prediction make_prediction(const CoreAction & core,
                            const PreparedInputs & prepared,
                            const policy::PolicySpecDraft & spec) {
     const policy::ActionSpec & action = spec.action;
-    if (core.horizon != action.horizon ||
-        core.model_action_dim != action.model_dim ||
-        core.values.size() != action.horizon * action.model_dim) {
-        throw Error(ErrorCode::inference_failed,
-                    "GWP core action shape does not match PolicySpec");
-    }
+    policy::validate_core_action(core.values, action);
     const policy::PolicyActionChunk action_chunk =
         policy::decode_action_reference(
-            core.values, prepared.raw_state, action, action.stats);
+            core.values, prepared.observation.raw_state, action, action.stats);
     Prediction prediction;
     prediction.action = policy::make_action_tensor(action_chunk);
     prediction.stats = core.stats;

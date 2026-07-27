@@ -72,10 +72,10 @@ int main(int argc, char ** argv) {
     const auto prepared = wam::internal::fastwam::prepare_inputs(
         inputs, *artifact, *policy_spec,
         wam::LanguageRuntimeMode::external_embedding, rng);
-    require(prepared.composite_image.width == 320 &&
-                prepared.composite_image.height == 384 &&
-                prepared.model_state.size() == 14 &&
-                prepared.action_noise == noise,
+    require(prepared.observation.composite_image.width == 320 &&
+                prepared.observation.composite_image.height == 384 &&
+                prepared.observation.model_state.size() == 14 &&
+                prepared.observation.action_noise == noise,
             "FastWAM RoboTwin policy input boundary changed");
 
     wam::ModelOptions options;

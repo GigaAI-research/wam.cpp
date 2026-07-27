@@ -318,6 +318,8 @@ transport 把 WebSocket binary frame 中的 Protobuf/JPEG/PNG payload 解码为 
 
 `SessionImpl::predict()` 负责组织“公共输入函数 -> architecture 私有计算 -> 公共 action decode”的顺序，并直接返回 `Prediction`。模型可以定义自己的内部 prepared tensor 和 normalized action 类型，但这些类型不进入公共 runtime 接口，也不要求其他 architecture 复用。session 不读取仿真 observation 字典，不处理 `env.step()`，也不根据 profile/environment 名称做分支。
 
+公共 policy ops 提供非多态的 `prepare_observation_reference()`，统一完成命名视图解析、图像变换与 canvas composition、raw state 保留、state padding/normalization 和 action noise 准备，并返回 `PreparedObservation`。architecture 私有 `PreparedInputs` 通过组合持有该结果，只补充 language 和模型特有输入；不得复制上述公共流程。normalized action 和通用 timing 使用共享的内部 `CoreAction` 值类型，最终 shape/finite 校验统一调用 PolicySpec 驱动的 `validate_core_action()`。
+
 #### 5.6.1 Engine facade 和统一文件职责
 
 每个 architecture 在自己的目录中实现相同形状的私有 engine facade：
@@ -329,9 +331,11 @@ predict(engine_session, prepared_inputs)
 reset(engine_session)
 ```
 
-facade 的函数角色和生命周期一致：model-level engine 拥有共享 backend/weights，engine session 拥有 cache/graph/workspace，具体 architecture `SessionImpl` 拥有公共请求边界所需的 RNG。`ArtifactContract`、`PreparedInputs`、`CoreAction`、engine/session options 和具体 engine 类型均属于对应 architecture，不建立跨模型 engine-session 接口。0.5 不为 language encoder、observation encoder、backbone 或 action path 建立跨模型虚基类，也不要求不同模型共享中间 tensor。公共推理多态仍然只有 `ModelImpl`/`SessionImpl`。
+facade 的函数角色和生命周期一致：model-level engine 拥有共享 backend/weights，engine session 拥有 cache/graph/workspace，具体 architecture `SessionImpl` 拥有公共请求边界所需的 RNG。`ArtifactContract`、`PreparedInputs`、engine/session options 和具体 engine 类型均属于对应 architecture；只有不携带 architecture tensor 的 `CoreAction` 和 `EngineInfo` 是共享内部值类型。框架不建立跨模型 engine-session 接口。0.5 不为 language encoder、observation encoder、backbone 或 action path 建立跨模型虚基类，也不要求不同模型共享中间 tensor。公共推理多态仍然只有 `ModelImpl`/`SessionImpl`。
 
-engine 的目标目录统一为：
+同一 architecture 的多个 engine session 可以共享 model-level weights/backend，但不因此承诺并发执行。backend 不支持并发提交时，锁属于 engine facade 且只覆盖 architecture compute；公共 preprocess/postprocess 只受各自 session 的串行锁保护，不能被 model-level execution mutex 串行。
+
+engine 目录必须覆盖以下职责，但具体文件名和拆分粒度由真实模型结构决定：
 
 ```text
 src/models/<architecture>/engine/
@@ -340,10 +344,10 @@ src/models/<architecture>/engine/
   engine_internal.h
   weights.cpp
   runtime.cpp
-  language_encoder.cpp
-  observation_encoder.cpp
-  backbone.cpp
-  action.cpp
+  <language implementation>.cpp
+  <observation implementation>.cpp
+  <backbone implementation>.cpp
+  <action implementation>.cpp
   cache.cpp                  # 可选，只有真实 cache 生命周期时存在
 ```
 
@@ -356,13 +360,13 @@ src/models/<architecture>/engine/
 | `engine_internal.h` | architecture 私有 geometry、weights、graph、cache 和中间 tensor 类型 |
 | `weights.cpp` | GGUF tensor 绑定、shape/dtype 校验、component residency，不构建完整推理流程 |
 | `runtime.cpp` | backend/context/buffer、graph allocation/execution 和 tensor 传输 |
-| `language_encoder.cpp` | language input 到主干条件；tokens 模式执行对应语言路径，external embedding 模式消费已验证 embedding |
-| `observation_encoder.cpp` | 已完成公共 policy preprocessing 的 image/state/proprio 到模型内部 latent/token；不读取环境原始字段 |
-| `backbone.cpp` | architecture 的主要融合网络和 block 数学，如 MoT、Wan/DiT 或 PaliGemma/Gemma joint layers |
-| `action.cpp` | action/noise/time 条件、action input/output projection、action head，以及迭代或直接 action generation |
+| language implementation | language input 到主干条件；tokens 模式执行对应语言路径，external embedding 模式消费已验证 embedding |
+| observation implementation | 已完成公共 policy preprocessing 的 image/state/proprio 到模型内部 latent/token；不读取环境原始字段 |
+| backbone implementation | architecture 的主要融合网络和 block 数学，如 MoT、Wan/DiT 或 PaliGemma/Gemma joint layers |
+| action implementation | action/noise/time 条件、action input/output projection、action head，以及迭代或直接 action generation |
 | `cache.cpp` | 可选的 prefix/KV/graph cache 构建、命中、reset 和复用，不承担无 cache 模型的占位职责 |
 
-T5、VAE、MoT、PaliGemma、Gemma Expert 和 ActionDiT 等名字继续保留在具体类型、函数、权重前缀和测试 stage 中；统一的是外层职责，不是抹去模型结构。不存在某一职责时不创建空 `.cpp`。当单个职责包含多个可独立验证且拥有独立生命周期的 graph 时，可以在该 architecture 内继续拆分私有实现，但不得因此扩大 engine facade 或建立通用 processor/plugin 层。
+T5、VAE、MoT、PaliGemma、Gemma Expert 和 ActionDiT 等名字继续保留在具体文件、类型、函数、权重前缀和测试 stage 中；统一的是外层职责，不是文件名或模型结构。不存在某一职责时不创建空 `.cpp`。当单个职责包含多个可独立验证且拥有独立生命周期的 graph 时，可以在该 architecture 内继续拆分私有实现，但不得因此扩大 engine facade 或建立通用 processor/plugin 层。例如 FastWAM 可以直接使用 `vae.cpp`、`video_dit.cpp`、`action_dit.cpp`、`scheduler.cpp` 和 `pipeline.cpp`，而不需要再增加仅用于转发的 `observation_encoder.cpp`、`backbone.cpp` 和 `action.cpp`。
 
 对应关系如下：
 
@@ -374,7 +378,7 @@ T5、VAE、MoT、PaliGemma、Gemma Expert 和 ActionDiT 等名字继续保留在
 | action | action condition、velocity head、flow denoise | ActionDiT、action head、sampler | state/noise/time projection、flow sampling | action token/head decode |
 | cache | visual/text prefix cache | 由实际 checkpoint 路径决定 | VLM prefix KV cache | 可选或不存在 |
 
-pi0/pi0.5 的 PaliGemma 同时融合视觉和语言，不能为了文件名一致而把完整 PaliGemma 塞进 `language_encoder.cpp`；其融合层属于 `backbone.cpp`。同理，FastWAM 的 ActionDiT 可以保留自己的具体实现名，但通过 `action.cpp` 所属职责接入完整 engine。
+pi0/pi0.5 的 PaliGemma 同时融合视觉和语言，不能为了文件名一致而把完整 PaliGemma 塞进 language 文件；其融合层属于 backbone 职责。同理，FastWAM 的 ActionDiT 保留自己的具体实现名，并通过 action 职责接入完整 engine。
 
 #### 5.6.2 Engine 阶段 timing
 
@@ -888,13 +892,13 @@ src/models/fastwam/semantics.cpp
 src/models/fastwam/engine/engine.h
 src/models/fastwam/engine/engine.cpp
 src/models/fastwam/engine/engine_internal.h
-src/models/fastwam/engine/weights.cpp
-src/models/fastwam/engine/runtime.cpp
-src/models/fastwam/engine/language_encoder.cpp
-src/models/fastwam/engine/observation_encoder.cpp
-src/models/fastwam/engine/backbone.cpp
-src/models/fastwam/engine/action.cpp
-src/models/fastwam/engine/cache.cpp            # 仅在真实实现需要时增加
+src/models/fastwam/engine/pipeline.cpp
+src/models/fastwam/engine/vae.cpp
+src/models/fastwam/engine/video_dit.cpp
+src/models/fastwam/engine/action_dit.cpp
+src/models/fastwam/engine/scheduler.cpp
+src/models/fastwam/engine/ops.cpp
+src/models/fastwam/engine/cache.cpp            # 仅在存在跨请求 cache 时增加
 ```
 
 并在 `src/arch.h`、`src/model_registry.cpp`、`cmake/WamModels.cmake` 和 `cmake/WamOptions.cmake` 中注册 `fastwam` 与 `WAM_BUILD_FASTWAM`。

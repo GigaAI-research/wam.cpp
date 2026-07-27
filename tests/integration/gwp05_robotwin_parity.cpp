@@ -210,10 +210,10 @@ int main(int argc, char ** argv) {
             inputs, *artifact, spec,
             wam::LanguageRuntimeMode::external_embedding, rng);
         image_metrics = compare_values(
-            prepared.composite_image.pixels, expected_image,
+            prepared.observation.composite_image.pixels, expected_image,
             "PolicySpec image preprocessing", 1.0e-2, 3.0e-2);
         state_metrics = compare_values(
-            prepared.model_state, expected_state,
+            prepared.observation.model_state, expected_state,
             "PolicySpec state z-score", 1.0e-6, 1.0e-5);
         require(prepared.embedding.dtype == wam::DType::f32 &&
                     prepared.embedding.data.size() ==
@@ -224,7 +224,7 @@ int main(int argc, char ** argv) {
                 "external prompt embedding changed during preprocessing");
         require(prepared.embedding_attention_mask == attention_mask,
                 "external prompt attention mask changed");
-        require(prepared.action_noise == noise,
+        require(prepared.observation.action_noise == noise,
                 "explicit action noise changed during preprocessing");
     }
 

@@ -91,21 +91,22 @@ int main() {
         wam::internal::gwp05::prepare_inputs(
             inputs, *artifact, spec, wam::LanguageRuntimeMode::tokens,
             session_rng);
-    require(prepared.composite_image.width ==
+    require(prepared.observation.composite_image.width ==
                 spec.images.composition.width &&
-                prepared.composite_image.height ==
+                prepared.observation.composite_image.height ==
                     spec.images.composition.height &&
-                prepared.composite_image.layout ==
+                prepared.observation.composite_image.layout ==
                     wam::internal::policy::TensorLayout::chw,
             "GWP images were not prepared by common image ops");
-    require(prepared.raw_state == state, "GWP raw state copy changed");
-    require(prepared.model_state.size() == spec.state.model_dim,
+    require(prepared.observation.raw_state == state,
+            "GWP raw state copy changed");
+    require(prepared.observation.model_state.size() == spec.state.model_dim,
             "GWP model state was not padded and normalized");
     require(prepared.token_ids == std::vector<std::int32_t>({5, 6}) &&
                 prepared.attention_mask ==
                     std::vector<std::int32_t>({1, 1}),
             "GWP token padding was not canonicalized");
-    require(prepared.action_noise == noise,
+    require(prepared.observation.action_noise == noise,
             "GWP explicit action noise was not retained");
 
     std::vector<float> embedding_values(2 * 64, 0.125F);
@@ -124,7 +125,7 @@ int main() {
             session_rng);
     require(prepared_embedding.embedding.shape ==
                 std::vector<std::int64_t>({2, 64}) &&
-                prepared_embedding.action_noise.size() == 48U * 32U,
+                prepared_embedding.observation.action_noise.size() == 48U * 32U,
             "GWP external embedding contract changed");
 
     {

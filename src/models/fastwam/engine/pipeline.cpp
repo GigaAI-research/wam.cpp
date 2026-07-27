@@ -97,8 +97,9 @@ void append_proprio(std::vector<ggml_bf16_t> & context,
 }
 
 std::vector<ggml_bf16_t> initial_noise(const PreparedInputs & inputs) {
-    std::vector<ggml_bf16_t> result(inputs.action_noise.size());
-    ggml_fp32_to_bf16_row(inputs.action_noise.data(), result.data(),
+    const std::vector<float> & noise = inputs.observation.action_noise;
+    std::vector<ggml_bf16_t> result(noise.size());
+    ggml_fp32_to_bf16_row(noise.data(), result.data(),
                           static_cast<std::int64_t>(result.size()));
     return result;
 }
@@ -114,7 +115,8 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
     std::vector<ggml_bf16_t> context = embedding_bf16(inputs.embedding);
     std::vector<std::int32_t> context_mask =
         inputs.embedding_attention_mask;
-    append_proprio(context, context_mask, inputs.model_state, artifact);
+    append_proprio(context, context_mask, inputs.observation.model_state,
+                   artifact);
     const std::size_t context_tokens = context_mask.size();
     debug::dump("context", context,
                 {static_cast<std::int64_t>(context_tokens),
@@ -122,7 +124,7 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
 
     Clock::time_point phase_begin = Clock::now();
     const std::vector<float> pixels =
-        vae_pixels(inputs.composite_image, geometry);
+        vae_pixels(inputs.observation.composite_image, geometry);
     debug::dump("vae_pixels", pixels,
                 {12, static_cast<std::int64_t>(geometry.image_height / 2),
                  static_cast<std::int64_t>(geometry.image_width / 2)});
