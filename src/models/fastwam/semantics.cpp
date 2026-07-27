@@ -107,9 +107,12 @@ void validate_policy_semantics(const policy::PolicySpecDraft & spec,
         incompatible("FastWAM Gate B requires external embedding language input",
                      "wam.input.language", "embedding-only contract mismatch");
     }
-    if (spec.state.normalization.kind != policy::NormalizationKind::min_max ||
-        spec.action.normalization.kind != policy::NormalizationKind::min_max) {
-        incompatible("selected FastWAM Gate B profile requires min-max normalization",
+    const auto state_normalization = spec.state.normalization.kind;
+    const auto action_normalization = spec.action.normalization.kind;
+    if (state_normalization != action_normalization ||
+        (state_normalization != policy::NormalizationKind::min_max &&
+         state_normalization != policy::NormalizationKind::z_score)) {
+        incompatible("FastWAM requires matching min-max or z-score normalization",
                      "wam.normalization", "profile/checkpoint mismatch");
     }
     if (spec.action.recovery.kind != policy::ActionRecoveryKind::identity) {

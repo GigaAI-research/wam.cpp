@@ -141,3 +141,55 @@ The two-episode runner smoke used task 0, init states 0 and 1, and manifest SHA2
 succeeded in 85 and 94 controller steps. The run produced 19 requests, server-total mean
 658.23 ms and median 601.50 ms. A subsequent `--resume` invocation skipped both episodes and
 preserved the same counts and summary.
+
+The frozen task-0 formal manifest has SHA256
+`dee7258aa9ab60be52d4a62ba69a30b2ebacb36259bab66690bca44aa16a7d3a`.
+It completed `18/20` episodes successfully (`90.0%`) with 247 action-chunk requests.
+Server-total latency had mean 581.49 ms, P50 567.87 ms and P95 650.54 ms. RPC
+round-trip latency had mean 586.52 ms, P50 572.99 ms and P95 655.85 ms.
+
+For a long manifest, non-overlapping ordinal ranges may run in separate output
+directories and against separate servers:
+
+```bash
+python eval/sim/run_libero_client.py ... --manifest MANIFEST \
+  --output-dir SHARD_0 --episode-start 0 --episode-end 50
+```
+
+Every shard snapshots the complete manifest and a `selection.json`. Merge only
+after all ranges have completed:
+
+```bash
+python eval/sim/merge_libero_results.py \
+  --manifest MANIFEST \
+  --shard SHARD_0 --shard SHARD_1 --shard SHARD_2 --shard SHARD_3 \
+  --output-dir MERGED_RESULTS
+```
+
+The merger rejects different manifest hashes, model identities, overlapping or
+missing ranges, duplicate episodes and requests outside a shard selection.
+The merged summary includes suite-level and per-task success rates, request
+counts and latency distributions.
+
+## Formal Full-Suite Result
+
+The standard `libero_spatial`, `libero_object`, `libero_goal` and `libero_10`
+suites were evaluated with 20 fixed init states for each of their 10 tasks.
+The four frozen manifests therefore contain 800 episodes in total. Long runs
+used non-overlapping shards against four identical servers. The RPC latency
+includes concurrent-server queueing; server-total latency measures the server's
+own request execution.
+
+| Suite | Manifest SHA256 | Success | Requests | Server total mean/P50/P95 (ms) | RPC mean/P50/P95 (ms) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `libero_spatial` | `6b5780721be6a51ab9f79ef383ff744878bd308be48c03dadd9f690d0bed1513` | 22/200 (11.0%) | 7,333 | 645.43 / 602.35 / 1026.23 | 694.63 / 614.32 / 1101.84 |
+| `libero_object` | `380cf170f6d1a9eb86946e69624d0aa61cdbdab79ab24f0845dd781d75cc4365` | 9/200 (4.5%) | 7,809 | 604.29 / 602.20 / 633.48 | 678.64 / 616.27 / 1071.41 |
+| `libero_goal` | `9b9370ff6507eb8633fdfddc5340408b6ffe59e4e00d65d1555d41bca71d9542` | 29/200 (14.5%) | 7,212 | 612.64 / 598.89 / 637.02 | 745.72 / 624.43 / 1154.43 |
+| `libero_10` | `2796ebab967ac1c14f21416cb6c3933272268527263fe9ccd177759ab1c7a13a` | 0/200 (0.0%) | 14,000 | 608.38 / 598.14 / 632.98 | 725.93 / 616.99 / 1141.20 |
+
+The aggregate benchmark result is `60/800` (`7.5%`). The only non-zero
+per-task results were spatial tasks 0/3/5 (`18/20`, `3/20`, `1/20`), object
+tasks 1/8 (`7/20`, `2/20`), and goal tasks 1/8 (`18/20`, `11/20`). All 10
+`libero_10` tasks scored `0/20`. No episode failed because of RPC, model
+execution, input validation or CUDA errors. The low success rate is therefore
+a model/checkpoint effectiveness result, not an integration failure.

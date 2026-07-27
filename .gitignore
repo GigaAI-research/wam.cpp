@@ -50,6 +50,7 @@ venv/
 
 # Runtime output
 *.log
+MUJOCO_LOG.TXT
 core
 core.*
 /action*.f32

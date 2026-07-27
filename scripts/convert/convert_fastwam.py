@@ -142,9 +142,12 @@ def _stats(path: Path, profile: Mapping[str, Any]) -> dict[str, np.ndarray]:
         group = root.get(domain, {}).get("default")
         if not isinstance(group, Mapping):
             raise ValueError(f"normalization JSON has no {domain}.default group")
-        bounds = []
-        for source, target in (("global_min", "lower"),
-                               ("global_max", "upper")):
+        kind = profile["normalization"][domain]["kind"]
+        fields = (("global_min", "lower"), ("global_max", "upper")) \
+            if kind == "min_max" else \
+            (("global_mean", "mean"), ("global_std", "std"))
+        statistics = []
+        for source, target in fields:
             values = np.asarray(group.get(source), dtype=np.float32).reshape(-1)
             if values.size < size:
                 raise ValueError(
@@ -153,9 +156,12 @@ def _stats(path: Path, profile: Mapping[str, Any]) -> dict[str, np.ndarray]:
             if not np.all(np.isfinite(values)):
                 raise ValueError(f"{domain}.{source} contains NaN or Inf")
             result[f"wam.norm.{domain}.{target}"] = values
-            bounds.append(values)
-        if np.any(bounds[1] - bounds[0] <= epsilon):
+            statistics.append(values)
+        if kind == "min_max" and np.any(
+                statistics[1] - statistics[0] <= epsilon):
             raise ValueError(f"{domain} normalization range is too small")
+        if kind == "z_score" and np.any(statistics[1] <= epsilon):
+            raise ValueError(f"{domain} normalization std is too small")
     return result
 
 

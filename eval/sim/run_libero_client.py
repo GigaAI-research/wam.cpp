@@ -30,6 +30,9 @@ MAX_STEPS = {"libero_spatial": 400, "libero_object": 400,
              "libero_goal": 400, "libero_10": 700, "libero_90": 700}
 MANIFEST_FORMAT = "wam-libero-manifest-v1"
 RESULT_FORMAT = "wam-libero-eval-v1"
+LATENCY_FIELDS = (
+    "rpc_roundtrip_milliseconds", "server_total_milliseconds",
+    "server_model_milliseconds", "server_text_milliseconds")
 
 
 def check_observation_compatibility(policy_spec):
@@ -253,9 +256,28 @@ def _validate_runtime(info, execution):
 
 def _summary(manifest, manifest_sha256, model_identity, episodes, requests):
     successes = sum(bool(item["success"]) for item in episodes)
-    latency_fields = (
-        "rpc_roundtrip_milliseconds", "server_total_milliseconds",
-        "server_model_milliseconds", "server_text_milliseconds")
+    task_summaries = []
+    task_ids = sorted({int(item["task_id"]) for item in episodes
+                       if "task_id" in item})
+    for task_id in task_ids:
+        task_episodes = [item for item in episodes
+                         if int(item.get("task_id", -1)) == task_id]
+        episode_ids = {item["episode_id"] for item in task_episodes}
+        task_requests = [item for item in requests
+                         if item.get("episode_id") in episode_ids]
+        task_successes = sum(bool(item["success"]) for item in task_episodes)
+        task_summaries.append({
+            "task_id": task_id,
+            "task": task_episodes[0].get("task", ""),
+            "instruction": task_episodes[0].get("instruction", ""),
+            "completed_episodes": len(task_episodes),
+            "successes": task_successes,
+            "success_rate": task_successes / len(task_episodes),
+            "request_count": len(task_requests),
+            "latency": {
+                name: _distribution([item[name] for item in task_requests])
+                for name in LATENCY_FIELDS},
+        })
     return {
         "format": RESULT_FORMAT,
         "manifest_sha256": manifest_sha256,
@@ -269,7 +291,8 @@ def _summary(manifest, manifest_sha256, model_identity, episodes, requests):
         "text_encoder_request_count": sum(
             item["server_text_milliseconds"] > 0.0 for item in requests),
         "latency": {name: _distribution([item[name] for item in requests])
-                    for name in latency_fields},
+                    for name in LATENCY_FIELDS},
+        "tasks": task_summaries,
     }
 
 
@@ -283,6 +306,8 @@ def parse_args(argv=None):
     parser.add_argument("--create-manifest", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--episode-start", type=int, default=0)
+    parser.add_argument("--episode-end", type=int)
     parser.add_argument("--suite", choices=tuple(MAX_STEPS), default="libero_spatial")
     parser.add_argument("--task-ids", default="0")
     parser.add_argument("--episodes", type=int, default=1)
@@ -308,6 +333,10 @@ def parse_args(argv=None):
         parser.error("--descriptor is required when running evaluation")
     if args.episodes <= 0:
         parser.error("--episodes must be positive")
+    if args.episode_start < 0:
+        parser.error("--episode-start must be non-negative")
+    if args.episode_end is not None and args.episode_end <= args.episode_start:
+        parser.error("--episode-end must be greater than --episode-start")
     return args
 
 
@@ -471,12 +500,20 @@ def _create_manifest(args, suite):
 def _run_manifest(args, manifest, suite, get_libero_path, env_type):
     validate_manifest(manifest)
     manifest_sha256 = _manifest_hash(manifest)
+    episode_end = (len(manifest["episodes"]) if args.episode_end is None
+                   else args.episode_end)
+    if episode_end > len(manifest["episodes"]):
+        raise ValueError("episode range exceeds the manifest")
+    selection = {"episode_start": args.episode_start,
+                 "episode_end": episode_end}
+    selected_entries = manifest["episodes"][args.episode_start:episode_end]
     output_dir = args.output_dir.resolve()
     episode_path = output_dir / "episodes.jsonl"
     request_path = output_dir / "requests.jsonl"
     error_path = output_dir / "errors.jsonl"
     summary_path = output_dir / "summary.json"
     snapshot_path = output_dir / "manifest.json"
+    selection_path = output_dir / "selection.json"
     existing_episodes = _load_jsonl(episode_path)
     existing_requests = _load_jsonl(request_path)
     if (existing_episodes or existing_requests or summary_path.exists()) and not args.resume:
@@ -489,6 +526,11 @@ def _run_manifest(args, manifest, suite, get_libero_path, env_type):
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_bytes(_canonical_json(manifest))
+    if selection_path.exists():
+        if json.loads(selection_path.read_text()) != selection:
+            raise ValueError("output directory belongs to a different episode range")
+    else:
+        _write_json_atomic(selection_path, selection)
     completed = {item["episode_id"] for item in existing_episodes
                  if item.get("status") == "completed"}
     retained_requests = [item for item in existing_requests
@@ -515,7 +557,7 @@ def _run_manifest(args, manifest, suite, get_libero_path, env_type):
         runner = EpisodeRunner(
             suite, get_libero_path, env_type, rpc, info, execution,
             args.video_dir)
-        for entry in manifest["episodes"]:
+        for entry in selected_entries:
             if entry["episode_id"] in completed:
                 print(f"skip completed {entry['episode_id']}")
                 continue

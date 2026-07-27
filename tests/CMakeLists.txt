@@ -196,6 +196,16 @@ if(WAM_BUILD_FASTWAM)
     target_compile_options(wam_fastwam_libero_artifact PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
 
+    add_executable(wam_fastwam_robotwin_artifact
+        integration/fastwam_robotwin_artifact.cpp)
+    target_link_libraries(wam_fastwam_robotwin_artifact PRIVATE wam::core)
+    target_include_directories(wam_fastwam_robotwin_artifact PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/src)
+    target_compile_features(wam_fastwam_robotwin_artifact PRIVATE cxx_std_17)
+    target_compile_options(wam_fastwam_robotwin_artifact PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+
     if(WAM_TEST_FASTWAM_LIBERO_GGUF)
         if(NOT IS_ABSOLUTE "${WAM_TEST_FASTWAM_LIBERO_GGUF}" OR
            NOT EXISTS "${WAM_TEST_FASTWAM_LIBERO_GGUF}")
@@ -211,6 +221,23 @@ if(WAM_BUILD_FASTWAM)
     else()
         message(STATUS
             "wam: skipping FastWAM LIBERO artifact Gate B; set WAM_TEST_FASTWAM_LIBERO_GGUF")
+    endif()
+
+    if(WAM_TEST_FASTWAM_ROBOTWIN_GGUF)
+        if(NOT IS_ABSOLUTE "${WAM_TEST_FASTWAM_ROBOTWIN_GGUF}" OR
+           NOT EXISTS "${WAM_TEST_FASTWAM_ROBOTWIN_GGUF}")
+            message(FATAL_ERROR
+                "WAM_TEST_FASTWAM_ROBOTWIN_GGUF must name an existing absolute file")
+        endif()
+        add_test(NAME wam_fastwam_robotwin_artifact
+            COMMAND wam_fastwam_robotwin_artifact
+                "${WAM_TEST_FASTWAM_ROBOTWIN_GGUF}")
+        set_tests_properties(wam_fastwam_robotwin_artifact PROPERTIES
+            LABELS "integration;fastwam;artifact;robotwin;external"
+            TIMEOUT 120)
+    else()
+        message(STATUS
+            "wam: skipping FastWAM RoboTwin artifact gate; set WAM_TEST_FASTWAM_ROBOTWIN_GGUF")
     endif()
 
     if(WAM_CUDA AND WAM_TEST_FASTWAM_LIBERO_GGUF AND
@@ -342,5 +369,11 @@ if(WAM_BUILD_SERVING AND TARGET wam_proto_descriptor)
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_libero_manifest.py)
     set_tests_properties(wam_libero_manifest PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+
+    add_test(NAME wam_liberox_adapter
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_liberox_adapter.py)
+    set_tests_properties(wam_liberox_adapter PROPERTIES
         ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
 endif()

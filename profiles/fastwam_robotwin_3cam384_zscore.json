@@ -1,0 +1,90 @@
+{
+  "format": "wam-policy-spec-profile-v1",
+  "artifact_schema_version": 2,
+  "identity": {
+    "profile": "fastwam_robotwin_3cam384_zscore",
+    "checkpoint_revision": "fastwam_release/robotwin_uncond_3cam_384",
+    "training_dataset": "robotwin2_all",
+    "embodiment": "aloha_dual_arm"
+  },
+  "images": {
+    "roles": ["camera_high", "camera_left_wrist", "camera_right_wrist"],
+    "views": {
+      "camera_high": {
+        "target_height": 256,
+        "target_width": 320,
+        "resize_mode": "stretch",
+        "interpolation": "bilinear",
+        "antialias": true,
+        "rect": [0, 0, 320, 256]
+      },
+      "camera_left_wrist": {
+        "target_height": 128,
+        "target_width": 160,
+        "resize_mode": "stretch",
+        "interpolation": "bilinear",
+        "antialias": true,
+        "rect": [0, 256, 160, 128]
+      },
+      "camera_right_wrist": {
+        "target_height": 128,
+        "target_width": 160,
+        "resize_mode": "stretch",
+        "interpolation": "bilinear",
+        "antialias": true,
+        "rect": [160, 256, 160, 128]
+      }
+    },
+    "composition": {
+      "kind": "canvas",
+      "height": 384,
+      "width": 320
+    },
+    "color_space": "rgb",
+    "pixel_range": "minus_one_to_one",
+    "tensor_layout": "chw"
+  },
+  "state": {
+    "real_dim": 14,
+    "model_dim": 14,
+    "pad_value": 0.0,
+    "fields": [
+      "left.joint.0", "left.joint.1", "left.joint.2", "left.joint.3",
+      "left.joint.4", "left.joint.5", "left.gripper",
+      "right.joint.0", "right.joint.1", "right.joint.2", "right.joint.3",
+      "right.joint.4", "right.joint.5", "right.gripper"
+    ]
+  },
+  "language": {
+    "input_mode": "embedding",
+    "prompt_template": "A video recorded from a robot's point of view executing the following instruction: {task}",
+    "tokenizer_family": "umt5",
+    "tokenizer_revision": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    "max_tokens": 128,
+    "text_encoder_in_artifact": false,
+    "padding_side": "right",
+    "truncation_side": "right",
+    "attention_mask_required": true,
+    "special_token_ids": []
+  },
+  "action": {
+    "horizon": 32,
+    "real_dim": 14,
+    "model_dim": 14,
+    "fields": [
+      "left.joint.0", "left.joint.1", "left.joint.2", "left.joint.3",
+      "left.joint.4", "left.joint.5", "left.gripper",
+      "right.joint.0", "right.joint.1", "right.joint.2", "right.joint.3",
+      "right.joint.4", "right.joint.5", "right.gripper"
+    ],
+    "representation": "joint_position",
+    "frame": "controller",
+    "gripper": "continuous",
+    "recovery": {"kind": "identity"}
+  },
+  "normalization": {
+    "state": {"kind": "z_score", "clip": false},
+    "action": {"kind": "z_score", "clip": false},
+    "epsilon": 1e-08
+  }
+}

@@ -570,4 +570,4 @@ server 做权威 PolicySpec/EnvironmentContract compatibility check；client 持
 
 ## 18. 下一步
 
-Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。runner 冻结 task/init-state/simulator seed/explicit action-noise seed 和执行参数，逐 episode/request 落盘并支持带 manifest hash、模型身份和 orphan request 检查的恢复运行；task 0 两个 init-state smoke 为 `2/2`。下一步先冻结正式 LIBERO manifest 并扩大到 task 0 的 20 次评测，再扩展到完整 suite；之后进入 FastWAM RoboTwin profile 和 LIBERO-X。
+Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。LIBERO spatial task 0 的固定 20-episode 结果为 `18/20`。标准四组 LIBERO suite 的 800 个固定 episodes 已全部完成并严格合并：spatial `22/200`、object `9/200`、goal `29/200`、LIBERO-10 `0/200`，总计 `60/800`；无 RPC/runtime failure，低成功率属于 checkpoint 效果。FastWAM RoboTwin 3-camera/14D/z-score profile、真实 GGUF artifact gate，以及 LIBERO-X environment adapter 和单任务纵向 smoke 已完成。下一步先冻结本 checkpoint；随后在投入大规模 RoboTwin/LIBERO-X benchmark 前，核对 FastWAM checkpoint 的预期训练 task 范围和 donor Python baseline，解释当前跨 task 成功率差异。

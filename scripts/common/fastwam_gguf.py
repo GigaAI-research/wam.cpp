@@ -101,14 +101,23 @@ def load_policy_profile(path: Path) -> dict[str, Any]:
         raise ValueError("FastWAM external embedding requires an attention mask")
 
     normalization = profile["normalization"]
+    kinds = set()
     for domain in ("state", "action"):
         spec = normalization.get(domain)
-        if not isinstance(spec, dict) or spec.get("kind") != "min_max" or spec.get("clip") is not False:
-            raise ValueError(f"FastWAM LIBERO {domain} normalization must be unclipped min_max")
-    if normalization["state"].get("output_clamp") != [-5.0, 5.0]:
-        raise ValueError("FastWAM LIBERO state output clamp must be [-5,5]")
+        if not isinstance(spec, dict) or spec.get("kind") not in {
+                "min_max", "z_score"} or spec.get("clip") is not False:
+            raise ValueError(
+                f"FastWAM {domain} normalization must be unclipped min_max or z_score")
+        kinds.add(spec["kind"])
+    if len(kinds) != 1:
+        raise ValueError("FastWAM state and action normalization kinds must match")
+    if kinds == {"min_max"}:
+        if normalization["state"].get("output_clamp") != [-5.0, 5.0]:
+            raise ValueError("FastWAM min_max state output clamp must be [-5,5]")
+    elif "output_clamp" in normalization["state"]:
+        raise ValueError("FastWAM z_score state normalization must not clamp")
     if "output_clamp" in normalization["action"]:
-        raise ValueError("FastWAM LIBERO action normalization must not clamp")
+        raise ValueError("FastWAM action normalization must not clamp")
     epsilon = normalization.get("epsilon")
     if not isinstance(epsilon, (int, float)) or epsilon <= 0:
         raise ValueError("normalization epsilon must be positive")

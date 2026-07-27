@@ -36,6 +36,8 @@ set(WAM_TEST_GWP05_ROBOTWIN_REFERENCE_DIR "" CACHE PATH
     "Optional independent PyTorch BF16 reference used by Gate A")
 set(WAM_TEST_FASTWAM_LIBERO_GGUF "" CACHE FILEPATH
     "Optional FastWAM LIBERO PolicySpec GGUF used by Gate B")
+set(WAM_TEST_FASTWAM_ROBOTWIN_GGUF "" CACHE FILEPATH
+    "Optional FastWAM RoboTwin PolicySpec GGUF used by Gate B")
 set(WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR "" CACHE PATH
     "Optional frozen FastWAM LIBERO replay used by Gate B CUDA parity")
 
