@@ -2,6 +2,8 @@
 
 #include "ops.h"
 
+#include "backends/ggml/graph_context.h"
+#include "backends/ggml/graph_ops.h"
 #include "wam/error.h"
 
 #include "ggml-alloc.h"
@@ -14,13 +16,8 @@
 namespace wam::internal::fastwam {
 namespace {
 
-ggml_tensor * as_f32(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_F32 ? value : ggml_cast(ctx, value, GGML_TYPE_F32);
-}
-
-ggml_tensor * as_bf16(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_BF16 ? value : ggml_cast(ctx, value, GGML_TYPE_BF16);
-}
+using ggml_backend::as_bf16;
+using ggml_backend::as_f32;
 
 ggml_tensor * require_weight(Engine & engine, const std::string & name) {
     ggml_tensor * value = engine.weight(name.c_str());
@@ -169,11 +166,8 @@ std::vector<float> run_action_dit_step(
         video_cache.layers.size() != g.num_layers) {
         throw Error(ErrorCode::invalid_argument, "FastWAM action graph input shape mismatch");
     }
-    ggml_init_params params{};
-    params.mem_size = 512u * 1024u * 1024u;
-    params.no_alloc = true;
-    ggml_context * ctx = ggml_init(params);
-    if (!ctx) throw Error(ErrorCode::resource_exhausted, "cannot create FastWAM action graph context");
+    ggml_backend::GraphContext resources(512u * 1024u * 1024u);
+    ggml_context * ctx = resources.get();
 
     ggml_tensor * action = ggml_new_tensor_2d(
         ctx, GGML_TYPE_BF16, g.action_dim, g.action_horizon);
@@ -214,7 +208,6 @@ std::vector<float> run_action_dit_step(
     for (std::uint32_t layer = 0; layer < g.num_layers; ++layer) {
         if (video_cache.layers[layer].key.size() != cache_elements ||
             video_cache.layers[layer].value.size() != cache_elements) {
-            ggml_free(ctx);
             throw Error(ErrorCode::invalid_argument,
                         "FastWAM video K/V cache layer shape mismatch",
                         {{"layer", std::to_string(layer)}});
@@ -238,13 +231,8 @@ std::vector<float> run_action_dit_step(
     ggml_set_output(output);
     ggml_cgraph * graph = ggml_new_graph_custom(ctx, 65536, false);
     ggml_build_forward_expand(graph, output);
-    ggml_gallocr_t allocator = ggml_gallocr_new(
-        ggml_backend_get_default_buffer_type(engine.backend()));
-    if (!allocator || !ggml_gallocr_alloc_graph(allocator, graph)) {
-        if (allocator) ggml_gallocr_free(allocator);
-        ggml_free(ctx);
-        throw Error(ErrorCode::resource_exhausted, "cannot allocate FastWAM action graph");
-    }
+    resources.allocate(
+        graph, ggml_backend_get_default_buffer_type(engine.backend()));
     ggml_backend_tensor_set(action, action_input.data(), 0,
                             action_input.size() * sizeof(ggml_bf16_t));
     ggml_backend_tensor_set(context_input, context.data(), 0,
@@ -264,13 +252,10 @@ std::vector<float> run_action_dit_step(
                                 cache_elements * sizeof(ggml_bf16_t));
     }
     if (ggml_backend_graph_compute(engine.backend(), graph) != GGML_STATUS_SUCCESS) {
-        ggml_gallocr_free(allocator); ggml_free(ctx);
         throw Error(ErrorCode::inference_failed, "FastWAM ActionDiT graph execution failed");
     }
     std::vector<float> result(expected_action);
     ggml_backend_tensor_get(output, result.data(), 0, result.size() * sizeof(float));
-    ggml_gallocr_free(allocator);
-    ggml_free(ctx);
     return result;
 }
 

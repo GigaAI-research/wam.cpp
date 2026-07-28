@@ -7,8 +7,8 @@ bool run_unrolled_action_denoise(
         const std::vector<float> & timesteps, const std::vector<float> & sigmas) {
     const Config & cfg = model.cfg;
     const int64_t tokens = cfg.action_chunk;
-    if (!prefix_storage_is_valid(model) || !action_prompt_cache_enabled() ||
-        !prompt_kv_cache_enabled() ||
+    if (!prefix_storage_is_valid(model) || !action_prompt_cache_enabled(model) ||
+        !prompt_kv_cache_enabled(model) ||
         timesteps.size() != static_cast<size_t>(cfg.num_steps) ||
         sigmas.size() != static_cast<size_t>(cfg.num_steps + 1)) {
         return false;
@@ -63,7 +63,7 @@ bool run_unrolled_action_denoise(
         graph.alloc = ggml_gallocr_new(
             ggml_backend_get_default_buffer_type(model.backend));
         if (!graph.alloc || !ggml_gallocr_alloc_graph(graph.alloc, graph.cgraph)) return false;
-        std::fprintf(stderr, "wam(gwp05): unrolled action graph nodes=%d buffer=%.1f MiB\n",
+        logf(model, LogLevel::debug, "gwp05: unrolled action graph nodes=%d buffer=%.1f MiB",
                     ggml_graph_n_nodes(graph.cgraph),
                     ggml_gallocr_get_buffer_size(graph.alloc, 0) / (1024.0 * 1024.0));
         model.stats.ms_action_graph_build = std::chrono::duration<float, std::milli>(
@@ -130,8 +130,8 @@ bool run_cached_action_step(Gwp05ModelArch & model,
         if (!graph.action_input_buffer || ggml_backend_tensor_alloc(
                 graph.action_input_buffer, graph.action_input,
                 ggml_backend_buffer_get_base(graph.action_input_buffer)) != GGML_STATUS_SUCCESS) return false;
-        const bool cache_action_prompt = action_prompt_cache_enabled();
-        const bool cache_prompt_kv = prompt_kv_cache_enabled();
+        const bool cache_action_prompt = action_prompt_cache_enabled(model);
+        const bool cache_prompt_kv = prompt_kv_cache_enabled(model);
         const bool single_token_timestep = single_token_timestep_enabled(model);
         const int64_t condition_tokens = single_token_timestep ? 1 : tokens;
         if (cache_action_prompt && !model.prefix_storage->action_prompt) return false;
@@ -156,7 +156,7 @@ bool run_cached_action_step(Gwp05ModelArch & model,
             graph.prompt_input, cfg.expert_h, condition_tokens,
             cache_action_prompt ? model.prefix_storage->action_prompt : nullptr,
             !cache_prompt_kv);
-        if (cache_debug_dump_enabled()) {
+        if (cache_debug_dump_enabled(model)) {
             graph.action_condition_debug = ggml_dup(ctx, condition.modulation);
             graph.action_temb_debug = ggml_dup(ctx, condition.temb);
         }
@@ -179,7 +179,7 @@ bool run_cached_action_step(Gwp05ModelArch & model,
             ExpertQkv qkv = expert_qkv(
                 ctx, model, prefix, hidden, scale, shift, graph.positions,
                 nullptr, nullptr, nullptr, false);
-            if (layer == 0 && cache_debug_dump_enabled()) {
+            if (layer == 0 && cache_debug_dump_enabled(model)) {
                 graph.action_q_debug = ggml_dup(ctx, qkv.q);
                 graph.action_k_debug = ggml_dup(ctx, qkv.k);
                 graph.action_v_debug = ggml_dup(ctx, qkv.v);
@@ -248,10 +248,10 @@ bool run_cached_action_step(Gwp05ModelArch & model,
                 ctx, model, prefix, hidden, condition.text,
                 cshift, cscale, cgate,
                 prompt_k, prompt_v);
-            if (layer == 0 && cache_debug_dump_enabled()) {
+            if (layer == 0 && cache_debug_dump_enabled(model)) {
                 graph.block0_action_debug = ggml_dup(ctx, hidden);
             }
-            if (layer + 1 == cfg.n_layers && cache_debug_dump_enabled()) {
+            if (layer + 1 == cfg.n_layers && cache_debug_dump_enabled(model)) {
                 graph.block_last_action_debug = ggml_dup(ctx, hidden);
             }
         }
@@ -282,9 +282,9 @@ bool run_cached_action_step(Gwp05ModelArch & model,
         graph.action_output = scheduler_step(
             ctx, model, graph.action_input, graph.prediction, graph.dt_input);
         ggml_set_output(graph.action_output);
-        const bool keep_prediction = debug_dump_enabled() ||
-                                     cache_debug_dump_enabled() ||
-                                     std::getenv("WAM_GWP05_CPU_SCHEDULER") != nullptr;
+        const bool keep_prediction = debug_dump_enabled(model) ||
+                                     cache_debug_dump_enabled(model) ||
+                                     model.tuning.force_cpu_scheduler;
         if (keep_prediction) ggml_set_output(graph.prediction);
         if (graph.block0_action_debug) ggml_set_output(graph.block0_action_debug);
         if (graph.block_last_action_debug) ggml_set_output(graph.block_last_action_debug);
@@ -312,7 +312,7 @@ bool run_cached_action_step(Gwp05ModelArch & model,
         ggml_graph_assign_uid(graph.cgraph);
         graph.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(model.backend));
         if (!graph.alloc || !ggml_gallocr_alloc_graph(graph.alloc, graph.cgraph)) return false;
-        std::fprintf(stderr, "wam(gwp05): cached action graph nodes=%d buffer=%.1f MiB\n",
+        logf(model, LogLevel::debug, "gwp05: cached action graph nodes=%d buffer=%.1f MiB",
                     ggml_graph_n_nodes(graph.cgraph),
                     ggml_gallocr_get_buffer_size(graph.alloc, 0) / (1024.0 * 1024.0));
         model.stats.ms_action_graph_build = std::chrono::duration<float, std::milli>(
@@ -342,27 +342,27 @@ bool run_cached_action_step(Gwp05ModelArch & model,
     if (graph.block0_action_debug) {
         char name[64];
         std::snprintf(name, sizeof(name), "denoise_%02d_block0_action", step);
-        debug_dump_tensor(name, graph.block0_action_debug);
+        debug_dump_tensor(model, name, graph.block0_action_debug);
     }
     if (graph.block_last_action_debug) {
         char name[64];
         std::snprintf(name, sizeof(name), "denoise_%02d_block_last_action", step);
-        debug_dump_tensor(name, graph.block_last_action_debug);
+        debug_dump_tensor(model, name, graph.block_last_action_debug);
     }
     if (graph.action_condition_debug) {
         char name[64];
         std::snprintf(name, sizeof(name), "denoise_%02d_action_condition", step);
-        debug_dump_tensor(name, graph.action_condition_debug);
+        debug_dump_tensor(model, name, graph.action_condition_debug);
     }
     if (graph.action_temb_debug) {
         char name[64];
         std::snprintf(name, sizeof(name), "denoise_%02d_action_temb", step);
-        debug_dump_tensor(name, graph.action_temb_debug);
+        debug_dump_tensor(model, name, graph.action_temb_debug);
     }
     if (step == 0) {
-        debug_dump_tensor("denoise_00_action_q", graph.action_q_debug);
-        debug_dump_tensor("denoise_00_action_k", graph.action_k_debug);
-        debug_dump_tensor("denoise_00_action_v", graph.action_v_debug);
+        debug_dump_tensor(model, "denoise_00_action_q", graph.action_q_debug);
+        debug_dump_tensor(model, "denoise_00_action_k", graph.action_k_debug);
+        debug_dump_tensor(model, "denoise_00_action_v", graph.action_v_debug);
     }
     if (prediction_host) {
         get_f32_tensor(graph.prediction, *prediction_host);

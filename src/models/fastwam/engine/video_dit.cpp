@@ -2,6 +2,8 @@
 
 #include "ops.h"
 
+#include "backends/ggml/graph_context.h"
+#include "backends/ggml/graph_ops.h"
 #include "wam/error.h"
 
 #include "ggml-alloc.h"
@@ -13,13 +15,8 @@
 namespace wam::internal::fastwam {
 namespace {
 
-ggml_tensor * as_f32(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_F32 ? value : ggml_cast(ctx, value, GGML_TYPE_F32);
-}
-
-ggml_tensor * as_bf16(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_BF16 ? value : ggml_cast(ctx, value, GGML_TYPE_BF16);
-}
+using ggml_backend::as_bf16;
+using ggml_backend::as_f32;
 
 ggml_tensor * require_weight(Engine & engine, const std::string & name) {
     ggml_tensor * value = engine.weight(name.c_str());
@@ -180,14 +177,8 @@ VideoKvCache prefill_video_cache(
                     "FastWAM Video Expert input shape mismatch");
     }
 
-    ggml_init_params params{};
-    params.mem_size = 512u * 1024u * 1024u;
-    params.no_alloc = true;
-    ggml_context * ctx = ggml_init(params);
-    if (!ctx) {
-        throw Error(ErrorCode::resource_exhausted,
-                    "cannot create FastWAM Video Expert graph");
-    }
+    ggml_backend::GraphContext resources(512u * 1024u * 1024u);
+    ggml_context * ctx = resources.get();
     const std::int64_t tokens = sequence.video_tokens;
     ggml_tensor * latent_input = ggml_new_tensor_3d(
         ctx, GGML_TYPE_BF16, sequence.latent_width,
@@ -252,14 +243,8 @@ VideoKvCache prefill_video_cache(
         ggml_build_forward_expand(graph, output.key);
         ggml_build_forward_expand(graph, output.value);
     }
-    ggml_gallocr_t allocator = ggml_gallocr_new(
-        ggml_backend_get_default_buffer_type(engine.backend()));
-    if (!allocator || !ggml_gallocr_alloc_graph(allocator, graph)) {
-        if (allocator) ggml_gallocr_free(allocator);
-        ggml_free(ctx);
-        throw Error(ErrorCode::resource_exhausted,
-                    "cannot allocate FastWAM Video Expert graph");
-    }
+    resources.allocate(
+        graph, ggml_backend_get_default_buffer_type(engine.backend()));
 
     ggml_backend_tensor_set(latent_input, latent.data(), 0,
                             latent.size() * sizeof(ggml_bf16_t));
@@ -281,8 +266,6 @@ VideoKvCache prefill_video_cache(
     ggml_backend_tensor_set(attention_mask, mask.data(), 0,
                             mask.size() * sizeof(float));
     if (ggml_backend_graph_compute(engine.backend(), graph) != GGML_STATUS_SUCCESS) {
-        ggml_gallocr_free(allocator);
-        ggml_free(ctx);
         throw Error(ErrorCode::inference_failed,
                     "FastWAM Video Expert graph execution failed");
     }
@@ -300,8 +283,6 @@ VideoKvCache prefill_video_cache(
         ggml_backend_tensor_get(outputs[layer].value, cache.layers[layer].value.data(),
                                 0, elements * sizeof(ggml_bf16_t));
     }
-    ggml_gallocr_free(allocator);
-    ggml_free(ctx);
     return cache;
 }
 

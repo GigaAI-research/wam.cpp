@@ -523,6 +523,16 @@ SessionConfig 包含：
 - 实现 Logger、Telemetry 和 RuntimeConfig，移除模型隐藏环境变量与 `fprintf`。
 - 只抽取 GWP05/FastWAM 已经重复的基础 graph op。
 
+完成状态：
+
+- 已删除 `Arch` enum 及 architecture switch。`ModelRegistry` 现在以严格、区分大小写的字符串 ID 保存 `ArchitectureDescriptor`；descriptor 同时声明 architecture、基础 capabilities 和 factory。`builtin_modules.cpp` 显式组装 GWP05/FastWAM descriptor，dummy `third-model` 测试证明新增架构不需要修改 Runtime enum 或 switch。
+- 已增加 GWP05/FastWAM 薄 `module.*` 入口；模型 factory 注册职责不再混入 `model.*`。本阶段只移动注册入口和公共运行时类型，没有迁移模型数学、改变 Tensor 名称、推理次序或 Phase 5/6 目标目录。
+- 已建立 `src/backends/ggml/` 公共资源层：`BackendContext` 独占 backend handle，`WeightStore` 独占权重 metadata/buffer，`GraphContext` 独占 graph metadata/allocator，`tensor_io` 统一 F32/BF16 host I/O，`graph_ops` 只包含两个模型确实重复的 dtype cast，`DebugDump` 统一 tensor data/shape metadata 导出。GWP05/FastWAM 已删除相应手工释放和重复实现。
+- 已将 `EngineInfo/CoreAction` 收口到 `runtime/runtime_types.h`，新增集中式 `Logger` 和 `Telemetry::append_timing`。GWP05/FastWAM 的错误、进度和运行摘要全部经过 Runtime Logger；模型生产代码不再读取隐藏环境变量，也不再直接写 stdio。
+- 已扩充显式 `RuntimeConfig`：debug dump 和 dtype audit 由 `DebugDumpConfig` 控制；prefix/action prompt/prompt KV/graph cache 及 CPU scheduler 调试路径由 `RuntimeTuningConfig` 控制。源码边界测试强制禁止模型层重新引入 `getenv`/stdio，并禁止 Backend 依赖具体模型、Policy 或 Artifact parser。
+- 已增加 Runtime/Backend 单元测试，覆盖 Logger level/callback、Telemetry、DebugDump、非法资源参数、Backend move/reset、WeightStore 上传读取、Graph 重复分配异常，以及 32 次完整资源构造/异常/析构循环。既有 Model lifecycle 测试继续覆盖 Session predict/reset/析构路径。
+- 验证结果：默认 CPU 36/36、关闭 GWP05/FastWAM/Serving 的 Runtime-only 25/25、CUDA 12.4 + cuDNN + `sm_80` 36/36。外部真实 Artifact/parity gate 未配置资产路径，模型数值迁移仍留在 Phase 5/6。
+
 验收：dummy 第三模型可以只通过 descriptor 接入；Backend 资源在成功、异常、Session reset 和析构路径均无泄漏。
 
 ### Phase 5：迁移 GWP05

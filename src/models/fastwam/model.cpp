@@ -1,7 +1,8 @@
 #include "models/fastwam/model.h"
 
-#include "arch.h"
-#include "model_registry.h"
+#include "backends/ggml/debug_dump.h"
+#include "runtime/logger.h"
+
 #include "models/fastwam/artifact.h"
 #include "models/fastwam/engine/engine.h"
 #include "models/fastwam/inputs.h"
@@ -146,6 +147,14 @@ std::unique_ptr<ModelImpl> create_model(
         engine_options.backend = options.backend;
         engine_options.compute_precision = options.compute_precision;
         engine_options.device_index = options.device_index;
+        engine_options.logger =
+            std::make_shared<runtime::Logger>(options);
+        engine_options.debug_dump =
+            std::make_shared<ggml_backend::DebugDump>(
+                options.debug_dump,
+                [logger = engine_options.logger](std::string_view message) {
+                    logger->log(LogLevel::warning, message);
+                });
         runtime = engine::create_engine(*artifact, engine_options);
         const engine::EngineInfo & runtime_info = engine::engine_info(*runtime);
         info.backend = runtime_info.backend;
@@ -172,11 +181,3 @@ std::unique_ptr<ModelImpl> create_model(
 }
 
 } // namespace wam::internal::fastwam
-
-namespace wam::internal {
-
-void register_fastwam(ModelRegistry & registry) {
-    registry.add(Arch::fastwam, fastwam::create_model);
-}
-
-} // namespace wam::internal

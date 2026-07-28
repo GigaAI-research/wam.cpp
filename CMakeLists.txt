@@ -87,6 +87,16 @@ if(WAM_CUDA)
         $<BUILD_INTERFACE:ggml-cuda>)
 endif()
 
+add_library(wam_backend_ggml_impl OBJECT
+    src/backends/ggml/backend_context.cpp
+    src/backends/ggml/debug_dump.cpp
+    src/backends/ggml/graph_context.cpp
+    src/backends/ggml/graph_ops.cpp
+    src/backends/ggml/tensor_io.cpp
+    src/backends/ggml/weight_store.cpp)
+wam_configure_internal_target(wam_backend_ggml_impl)
+target_link_libraries(wam_backend_ggml_impl PRIVATE wam_backend_ggml)
+
 add_library(wam_artifact OBJECT
     src/artifact/artifact_view.cpp
     src/artifact/gguf_reader.cpp
@@ -115,9 +125,10 @@ add_library(wam_runtime_base OBJECT
     src/error.cpp
     src/observation.cpp
     src/prediction.cpp
-    src/arch.cpp
     src/model_internal.cpp
-    src/model_registry.cpp)
+    src/runtime/logger.cpp
+    src/runtime/model_registry.cpp
+    src/runtime/telemetry.cpp)
 add_library(wam::runtime_base ALIAS wam_runtime_base)
 wam_configure_internal_target(wam_runtime_base)
 target_link_libraries(wam_runtime_base PRIVATE wam_policy)
@@ -136,6 +147,7 @@ if(WAM_BUILD_GWP05)
         src/models/gwp05/engine/runtime.cpp
         src/models/gwp05/engine/weights.cpp
         src/models/gwp05/inputs.cpp
+        src/models/gwp05/module.cpp
         src/models/gwp05/model.cpp
         src/models/gwp05/semantics.cpp)
     add_library(wam::model_gwp05 ALIAS wam_model_gwp05)
@@ -159,7 +171,6 @@ if(WAM_BUILD_FASTWAM)
     add_library(wam_model_fastwam OBJECT
         src/models/fastwam/artifact.cpp
         src/models/fastwam/engine/action_dit.cpp
-        src/models/fastwam/engine/debug.cpp
         src/models/fastwam/engine/engine.cpp
         src/models/fastwam/engine/ops.cpp
         src/models/fastwam/engine/pipeline.cpp
@@ -167,6 +178,7 @@ if(WAM_BUILD_FASTWAM)
         src/models/fastwam/engine/vae.cpp
         src/models/fastwam/engine/video_dit.cpp
         src/models/fastwam/inputs.cpp
+        src/models/fastwam/module.cpp
         src/models/fastwam/model.cpp
         src/models/fastwam/semantics.cpp)
     add_library(wam::model_fastwam ALIAS wam_model_fastwam)
@@ -183,6 +195,7 @@ add_library(wam_core_archive STATIC
     src/model.cpp
     src/pipeline.cpp
     src/models/builtin_modules.cpp
+    $<TARGET_OBJECTS:wam_backend_ggml_impl>
     $<TARGET_OBJECTS:wam_artifact>
     $<TARGET_OBJECTS:wam_policy>
     $<TARGET_OBJECTS:wam_runtime_base>

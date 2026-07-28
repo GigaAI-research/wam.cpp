@@ -1,5 +1,7 @@
 #include "models/gwp05/engine/engine_internal.h"
 
+#include "wam/error.h"
+
 #include <chrono>
 #include <cstring>
 
@@ -51,8 +53,7 @@ bool component_is_loaded(const Gwp05ModelArch & model, WeightComponent component
 void unload_component(Gwp05ModelArch & model, WeightComponent component) {
     const auto begin = std::chrono::steady_clock::now();
     const size_t index = static_cast<size_t>(component);
-    if (!model.component_loaded[index] && !model.weight_buffers[index] &&
-        !model.weight_contexts[index]) {
+    if (!model.component_loaded[index] && !model.weight_stores[index]) {
         return;
     }
     if (model.backend) ggml_backend_synchronize(model.backend);
@@ -64,14 +65,7 @@ void unload_component(Gwp05ModelArch & model, WeightComponent component) {
             ++it;
         }
     }
-    if (model.weight_buffers[index]) {
-        ggml_backend_buffer_free(model.weight_buffers[index]);
-        model.weight_buffers[index] = nullptr;
-    }
-    if (model.weight_contexts[index]) {
-        ggml_free(model.weight_contexts[index]);
-        model.weight_contexts[index] = nullptr;
-    }
+    model.weight_stores[index].reset();
     model.component_loaded[index] = false;
     model.component_device_bytes[index] = 0;
     model.component_unload_milliseconds[index] =
@@ -93,68 +87,53 @@ bool load_component(GgufReader & reader, Gwp05ModelArch & model,
         if (std::strncmp(info.name.c_str(), prefix, prefix_size) == 0) ++weight_count;
     }
     if (weight_count == 0) return false;
-    ggml_init_params params{};
-    params.mem_size = (weight_count + 32) * ggml_tensor_overhead();
-    params.no_alloc = true;
-    model.weight_contexts[index] = ggml_init(params);
-    if (!model.weight_contexts[index]) return false;
+    try {
+        model.weight_stores[index] =
+            std::make_unique<ggml_backend::WeightStore>(
+                model.backend, weight_count);
 
-    size_t max_tensor_bytes = 0;
-    for (const GgufTensorInfo & info : tensors) {
-        const char * name = info.name.c_str();
-        if (std::strncmp(name, prefix, prefix_size) != 0) continue;
-        ggml_type type = GGML_TYPE_COUNT;
-        if (info.dtype == DType::f32) {
-            type = GGML_TYPE_F32;
-        } else if (info.dtype == DType::bf16) {
-            type = GGML_TYPE_BF16;
-        } else {
-            std::fprintf(stderr,
-                         "wam(gwp05): unsupported weight dtype for %s\n", name);
-            unload_component(model, component);
-            return false;
+        size_t max_tensor_bytes = 0;
+        for (const GgufTensorInfo & info : tensors) {
+            const char * name = info.name.c_str();
+            if (std::strncmp(name, prefix, prefix_size) != 0) continue;
+            ggml_tensor * destination = model.weight_stores[index]->define(
+                info.name, info.dtype, info.shape);
+            model.weights.emplace(name, destination);
+            max_tensor_bytes =
+                std::max(max_tensor_bytes, ggml_nbytes(destination));
         }
-        ggml_tensor * destination = ggml_new_tensor(
-            model.weight_contexts[index], type,
-            static_cast<int>(info.shape.size()), info.shape.data());
-        ggml_set_name(destination, name);
-        model.weights.emplace(name, destination);
-        max_tensor_bytes = std::max(max_tensor_bytes, ggml_nbytes(destination));
-    }
-    model.weight_buffers[index] =
-        ggml_backend_alloc_ctx_tensors(model.weight_contexts[index], model.backend);
-    if (!model.weight_buffers[index]) {
-        std::fprintf(stderr, "wam(gwp05): cannot allocate %s weight buffer\n",
-                     component_name(component));
+        model.weight_stores[index]->allocate();
+
+        std::vector<uint8_t> staging(max_tensor_bytes);
+        size_t loaded = 0;
+        for (auto & item : model.weights) {
+            if (item.first.compare(0, prefix_size, prefix) != 0) continue;
+            ggml_tensor * destination = item.second;
+            const size_t bytes = ggml_nbytes(destination);
+            if (!reader.read_tensor(item.first, staging.data(), bytes)) {
+                unload_component(model, component);
+                return false;
+            }
+            model.weight_stores[index]->set(
+                item.first, staging.data(), bytes);
+            if ((++loaded % 100) == 0) {
+                logf(model, LogLevel::debug, "gwp05: loaded %s %zu/%zu tensors",
+                             component_name(component), loaded, weight_count);
+                std::fflush(stderr);
+            }
+        }
+    } catch (const Error &) {
         unload_component(model, component);
         return false;
     }
-
-    std::vector<uint8_t> staging(max_tensor_bytes);
-    size_t loaded = 0;
-    for (auto & item : model.weights) {
-        if (item.first.compare(0, prefix_size, prefix) != 0) continue;
-        ggml_tensor * destination = item.second;
-        const size_t bytes = ggml_nbytes(destination);
-        if (!reader.read_tensor(item.first, staging.data(), bytes)) {
-            unload_component(model, component);
-            return false;
-        }
-        ggml_backend_tensor_set(destination, staging.data(), 0, bytes);
-        if ((++loaded % 100) == 0) {
-            std::fprintf(stderr, "wam(gwp05): loaded %s %zu/%zu tensors\r",
-                         component_name(component), loaded, weight_count);
-            std::fflush(stderr);
-        }
-    }
-    const size_t bytes = ggml_backend_buffer_get_size(model.weight_buffers[index]);
+    const size_t bytes = model.weight_stores[index]->bytes();
     model.component_loaded[index] = true;
     model.component_device_bytes[index] = bytes;
     model.component_load_milliseconds[index] =
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - begin).count();
     refresh_component_telemetry(model);
-    std::fprintf(stderr, "wam(gwp05): %s owns %zu tensors (%.2f GiB)\n",
+    logf(model, LogLevel::info, "gwp05: %s owns %zu tensors (%.2f GiB)",
                  component_name(component), weight_count,
                  static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0));
     return true;
@@ -168,7 +147,7 @@ bool load_resident_weights(GgufReader & reader, Gwp05ModelArch & model) {
         return false;
     }
     model.load_state = LoadState::fully_resident;
-    std::fprintf(stderr, "wam(gwp05): loaded %zu tensors (%.2f GiB total)\n",
+    logf(model, LogLevel::info, "gwp05: loaded %zu tensors (%.2f GiB total)",
                  model.weights.size(), static_cast<double>(model.resident_device_bytes) /
                      (1024.0 * 1024.0 * 1024.0));
     return true;

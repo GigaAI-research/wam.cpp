@@ -1,12 +1,12 @@
 #include "pipeline.h"
 
 #include "action_dit.h"
-#include "debug.h"
 #include "scheduler.h"
 #include "vae.h"
 #include "video_dit.h"
 
 #include "wam/error.h"
+#include "runtime/telemetry.h"
 
 #include "ggml.h"
 
@@ -126,32 +126,32 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
     append_proprio(context, context_mask, inputs.observation.model_state,
                    artifact);
     const std::size_t context_tokens = context_mask.size();
-    debug::dump("context", context,
+    engine.debug_dump().write("context", context,
                 {static_cast<std::int64_t>(context_tokens),
                  static_cast<std::int64_t>(geometry.text_dim)});
 
     Clock::time_point phase_begin = Clock::now();
     const std::vector<float> pixels =
         vae_pixels(inputs.observation.composite_image, geometry);
-    debug::dump("vae_pixels", pixels,
+    engine.debug_dump().write("vae_pixels", pixels,
                 {12, static_cast<std::int64_t>(geometry.image_height / 2),
                  static_cast<std::int64_t>(geometry.image_width / 2)});
     const std::vector<ggml_bf16_t> latent = encode_first_frame(
         engine, artifact, pixels);
-    debug::dump("vae_latent", latent,
+    engine.debug_dump().write("vae_latent", latent,
                 {static_cast<std::int64_t>(geometry.latent_channels),
                  static_cast<std::int64_t>(
                      artifact.sequence_geometry.latent_height),
                  static_cast<std::int64_t>(
                      artifact.sequence_geometry.latent_width)});
     result.stats.model_vision_milliseconds = elapsed_ms(phase_begin);
-    result.stats.model_timings.push_back(
-        {"observation_encoder", result.stats.model_vision_milliseconds});
+    runtime::append_timing(result.stats, "observation_encoder",
+                           result.stats.model_vision_milliseconds);
 
     phase_begin = Clock::now();
     const VideoKvCache video_cache = prefill_video_cache(
         engine, artifact, latent, context, context_mask, context_tokens);
-    if (debug::enabled()) {
+    if (engine.debug_dump().enabled()) {
         const std::vector<std::int64_t> cache_shape = {
             static_cast<std::int64_t>(video_cache.tokens),
             static_cast<std::int64_t>(geometry.num_heads),
@@ -159,21 +159,21 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
         for (std::uint32_t layer = 0; layer < geometry.num_layers; ++layer) {
             const std::string index = layer < 10
                 ? "0" + std::to_string(layer) : std::to_string(layer);
-            debug::dump("video_k_" + index, video_cache.layers[layer].key,
+            engine.debug_dump().write("video_k_" + index, video_cache.layers[layer].key,
                         cache_shape);
-            debug::dump("video_v_" + index, video_cache.layers[layer].value,
+            engine.debug_dump().write("video_v_" + index, video_cache.layers[layer].value,
                         cache_shape);
         }
     }
     result.stats.model_prefill_milliseconds = elapsed_ms(phase_begin);
-    result.stats.model_timings.push_back(
-        {"backbone_prefill", result.stats.model_prefill_milliseconds});
+    runtime::append_timing(result.stats, "backbone_prefill",
+                           result.stats.model_prefill_milliseconds);
 
     std::vector<ggml_bf16_t> action = initial_noise(inputs);
     const std::vector<std::int64_t> action_shape = {
         static_cast<std::int64_t>(geometry.action_horizon),
         static_cast<std::int64_t>(geometry.action_dim)};
-    debug::dump("action_state_00", action, action_shape);
+    engine.debug_dump().write("action_state_00", action, action_shape);
     const FlowSchedule schedule = make_inference_schedule(
         static_cast<int>(geometry.inference_steps), geometry.action_shift);
     const std::vector<std::int32_t> positions =
@@ -187,7 +187,7 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
         const std::string step_name = step + 1 < 10
             ? "0" + std::to_string(step + 1)
             : std::to_string(step + 1);
-        debug::dump("action_velocity_" + step_name, velocity, action_shape);
+        engine.debug_dump().write("action_velocity_" + step_name, velocity, action_shape);
         for (std::size_t index = 0; index < action.size(); ++index) {
             const ggml_bf16_t product = ggml_fp32_to_bf16(
                 velocity[index] * schedule.deltas[step]);
@@ -195,14 +195,14 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
                 ggml_bf16_to_fp32(product);
             action[index] = ggml_fp32_to_bf16(action_f32[index]);
         }
-        debug::dump("action_state_" + step_name, action, action_shape);
+        engine.debug_dump().write("action_state_" + step_name, action, action_shape);
     }
     result.stats.model_decode_milliseconds = elapsed_ms(phase_begin);
-    result.stats.model_timings.push_back(
-        {"action_denoise", result.stats.model_decode_milliseconds});
+    runtime::append_timing(result.stats, "action_denoise",
+                           result.stats.model_decode_milliseconds);
     ggml_bf16_to_fp32_row(action.data(), action_f32.data(),
                           static_cast<std::int64_t>(action.size()));
-    debug::dump("action_normalized", action_f32, action_shape);
+    engine.debug_dump().write("action_normalized", action_f32, action_shape);
     result.values = std::move(action_f32);
     result.stats.model_milliseconds = elapsed_ms(model_begin);
     result.stats.peak_device_memory_bytes = engine.resident_device_bytes;

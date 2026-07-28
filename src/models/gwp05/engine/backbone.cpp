@@ -342,8 +342,8 @@ CachedActionBody build_cached_action_body(
     const Config & cfg = model.cfg;
     const int64_t tokens = cfg.action_chunk;
     const int64_t condition_tokens = frequency_input->ne[1];
-    const bool cache_action_prompt = action_prompt_cache_enabled();
-    const bool cache_prompt_kv = prompt_kv_cache_enabled();
+    const bool cache_action_prompt = action_prompt_cache_enabled(model);
+    const bool cache_prompt_kv = prompt_kv_cache_enabled(model);
     CachedActionBody output;
 
     ggml_tensor * hidden = action_encoder(ctx, model, "action_encoder", action_input);
@@ -689,7 +689,7 @@ bool run_mot_step(Gwp05ModelArch & model,
     graph.action_output = scheduler_step(
         ctx, model, action_input, prediction, graph.dt_input);
     ggml_set_output(graph.action_output);
-    if (dump_intermediates && debug_dump_enabled()) {
+    if (dump_intermediates && debug_dump_enabled(model)) {
         ggml_set_output(prediction);
         for (ggml_tensor * tensor : {action_tokens_debug, visual_tokens_debug,
                                      action_condition_debug, block0_action_debug}) {
@@ -699,7 +699,7 @@ bool run_mot_step(Gwp05ModelArch & model,
     graph.cgraph = ggml_new_graph_custom(ctx, 32768, false);
     ggml_cgraph * cgraph = graph.cgraph;
     ggml_build_forward_expand(cgraph, graph.action_output);
-    if (dump_intermediates && debug_dump_enabled()) {
+    if (dump_intermediates && debug_dump_enabled(model)) {
         ggml_build_forward_expand(cgraph, prediction);
         for (ggml_tensor * tensor : {action_tokens_debug, visual_tokens_debug,
                                      action_condition_debug, block0_action_debug}) {
@@ -709,8 +709,8 @@ bool run_mot_step(Gwp05ModelArch & model,
     ggml_graph_assign_uid(cgraph);
     graph.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(model.backend));
     if (!graph.alloc || !ggml_gallocr_alloc_graph(graph.alloc, cgraph)) return false;
-    audit_mixed_binary_nodes("complete-mot", cgraph);
-    std::fprintf(stderr, "wam(gwp05): cached MoT graph (%.1f MiB)\n",
+    audit_mixed_binary_nodes(model, "complete-mot", cgraph);
+    logf(model, LogLevel::debug, "gwp05: cached MoT graph (%.1f MiB)",
                 ggml_gallocr_get_buffer_size(graph.alloc, 0) / (1024.0 * 1024.0));
     }
 
@@ -787,10 +787,10 @@ bool run_mot_step(Gwp05ModelArch & model,
     ggml_backend_tensor_set(attention_mask, mask.data(), 0, mask.size() * sizeof(float));
     if (ggml_backend_graph_compute(model.backend, cgraph) != GGML_STATUS_SUCCESS) return false;
     if (dump_intermediates) {
-        debug_dump_tensor("action_tokens", action_tokens_debug);
-        debug_dump_tensor("visual_tokens", visual_tokens_debug);
-        debug_dump_tensor("action_condition", action_condition_debug);
-        debug_dump_tensor("block0_action", block0_action_debug);
+        debug_dump_tensor(model, "action_tokens", action_tokens_debug);
+        debug_dump_tensor(model, "visual_tokens", visual_tokens_debug);
+        debug_dump_tensor(model, "action_condition", action_condition_debug);
+        debug_dump_tensor(model, "block0_action", block0_action_debug);
     }
     if (prediction_output) {
         get_f32_tensor(prediction, *prediction_output);
@@ -800,7 +800,7 @@ bool run_mot_step(Gwp05ModelArch & model,
     if (action_output_host) {
         get_f32_tensor(action_output, *action_output_host);
     }
-    if (std::getenv("WAM_GWP05_DISABLE_MOT_GRAPH_CACHE")) model.mot_graph.reset();
+    if (!model.tuning.graph_cache) model.mot_graph.reset();
     return true;
 }
 } // namespace wam::internal::gwp05::engine

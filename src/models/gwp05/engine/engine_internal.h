@@ -2,6 +2,10 @@
 
 #include "models/gwp05/engine/engine.h"
 #include "artifact/gguf_reader.h"
+#include "backends/ggml/backend_context.h"
+#include "backends/ggml/debug_dump.h"
+#include "backends/ggml/graph_context.h"
+#include "backends/ggml/weight_store.h"
 #include "models/common/scheduler.h"
 #include "ggml.h"
 #include "ggml-alloc.h"
@@ -10,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdarg>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +35,7 @@
 namespace wam::internal::gwp05::engine {
 
 namespace gwp05_semantics = ::wam::internal::gwp05::semantics;
+using GraphContext = ggml_backend::GraphContext;
 
 constexpr float kPi = 3.14159265358979323846F;
 
@@ -130,17 +136,6 @@ struct EngineTelemetry {
 
 int default_cpu_threads();
 std::string compact_tensor_name(const std::string & full_name);
-std::size_t prompt_cache_capacity();
-
-struct GraphContext {
-    ggml_context * ctx = nullptr;
-    ggml_gallocr_t alloc = nullptr;
-
-    ~GraphContext() {
-        if (alloc) ggml_gallocr_free(alloc);
-        if (ctx) ggml_free(ctx);
-    }
-};
 
 struct MotGraph : GraphContext {
     ~MotGraph() {
@@ -296,12 +291,12 @@ struct Gwp05ModelArch {
     std::uint64_t peak_component_device_bytes = 0;
 
     ggml_backend_t backend = nullptr;
+    ggml_backend::BackendContext backend_context;
     Backend backend_request = Backend::automatic;
     int device_index = 0;
     // MoT, UMT5, and VAE own independent contexts and backend allocations.
     // Graphs access tensors through the non-owning name index below.
-    std::array<ggml_backend_buffer_t, 3> weight_buffers{};
-    std::array<ggml_context *, 3> weight_contexts{};
+    std::array<std::unique_ptr<ggml_backend::WeightStore>, 3> weight_stores{};
     std::array<bool, 3> component_loaded{};
     std::array<std::uint64_t, 3> component_device_bytes{};
     std::array<double, 3> component_load_milliseconds{};
@@ -310,6 +305,9 @@ struct Gwp05ModelArch {
     bool metadata_only = false;
     MotPrecisionPolicy precision_policy = MotPrecisionPolicy::F32;
     KernelDispatch dispatch{};
+    RuntimeTuningConfig tuning{};
+    std::shared_ptr<runtime::Logger> logger;
+    std::shared_ptr<ggml_backend::DebugDump> debug_dumper;
     std::string conversion_policy;
     bool building_native_action = false;
     int n_threads = default_cpu_threads();
@@ -323,7 +321,7 @@ struct Gwp05ModelArch {
     std::unique_ptr<UnrolledActionGraph> unrolled_action_graph;
     std::list<PromptCacheEntry> prompt_cache;
     std::optional<PromptCacheEntry> fixed_prompt;
-    size_t prompt_cache_limit = prompt_cache_capacity();
+    size_t prompt_cache_limit = 0;
     uint64_t prompt_cache_hits = 0;
     uint64_t prompt_cache_misses = 0;
     std::vector<float> projected_prompt_signature;
@@ -378,7 +376,10 @@ struct Gwp05ModelArch {
     ggml_tensor * weight(const std::string & name) const {
         const auto it = weights.find(compact_tensor_name(name));
         if (it == weights.end()) {
-            std::fprintf(stderr, "wam(gwp05): internal missing weight %s\n", name.c_str());
+            if (logger) {
+                logger->logf(LogLevel::error,
+                             "gwp05: internal missing weight %s", name.c_str());
+            }
             return nullptr;
         }
         return it->second;
@@ -463,16 +464,21 @@ struct CachedActionBody {
 
 
 const char * precision_policy_name(MotPrecisionPolicy policy);
-void debug_dump(const char * name, const std::vector<float> & values,
+void logf(const Gwp05ModelArch & model, LogLevel level,
+          const char * format, ...);
+void debug_dump(const Gwp05ModelArch & model, const char * name,
+                const std::vector<float> & values,
                 const std::vector<std::int64_t> & shape);
-bool debug_dump_enabled();
-bool cache_debug_dump_enabled();
-bool any_debug_dump_enabled();
-void audit_mixed_binary_nodes(const char * graph_name, ggml_cgraph * graph);
-void debug_dump_tensor(const char * name, ggml_tensor * tensor);
+bool debug_dump_enabled(const Gwp05ModelArch & model);
+bool cache_debug_dump_enabled(const Gwp05ModelArch & model);
+bool any_debug_dump_enabled(const Gwp05ModelArch & model);
+void audit_mixed_binary_nodes(const Gwp05ModelArch & model,
+                              const char * graph_name, ggml_cgraph * graph);
+void debug_dump_tensor(const Gwp05ModelArch & model, const char * name,
+                       ggml_tensor * tensor);
 
-bool action_prompt_cache_enabled();
-bool prompt_kv_cache_enabled();
+bool action_prompt_cache_enabled(const Gwp05ModelArch & model);
+bool prompt_kv_cache_enabled(const Gwp05ModelArch & model);
 bool single_token_timestep_enabled(const Gwp05ModelArch & model);
 bool cross_request_prompt_cache_enabled(const Gwp05ModelArch & model);
 bool native_bf16(const Gwp05ModelArch & model);

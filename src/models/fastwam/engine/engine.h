@@ -2,7 +2,9 @@
 
 #include "models/fastwam/artifact.h"
 #include "models/fastwam/inputs.h"
-#include "models/common/model_types.h"
+#include "backends/ggml/debug_dump.h"
+#include "runtime/logger.h"
+#include "runtime/runtime_types.h"
 
 #include <memory>
 
@@ -26,11 +28,13 @@ struct EngineOptions {
     Backend backend = Backend::automatic;
     ComputePrecision compute_precision = ComputePrecision::automatic;
     int device_index = 0;
+    std::shared_ptr<runtime::Logger> logger;
+    std::shared_ptr<ggml_backend::DebugDump> debug_dump;
 };
 
 struct EngineSessionOptions {};
 
-using EngineInfo = model_common::EngineInfo;
+using EngineInfo = runtime::EngineInfo;
 
 EnginePtr create_engine(const ArtifactContract & artifact,
                         const EngineOptions & options);

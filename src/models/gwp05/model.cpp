@@ -1,7 +1,8 @@
 #include "models/gwp05/model.h"
 
-#include "arch.h"
-#include "model_registry.h"
+#include "backends/ggml/debug_dump.h"
+#include "runtime/logger.h"
+
 #include "models/gwp05/artifact.h"
 #include "models/gwp05/engine/engine.h"
 #include "models/gwp05/inputs.h"
@@ -253,6 +254,15 @@ std::unique_ptr<ModelImpl> create_model(
         engine_options.device_index = options.device_index;
         engine_options.prompt_cache_capacity =
             options.prompt_cache_capacity;
+        engine_options.tuning = options.tuning;
+        engine_options.logger =
+            std::make_shared<runtime::Logger>(options);
+        engine_options.debug_dump =
+            std::make_shared<ggml_backend::DebugDump>(
+                options.debug_dump,
+                [logger = engine_options.logger](std::string_view message) {
+                    logger->log(LogLevel::warning, message);
+                });
         engine_options.language_mode = info.language_mode;
         engine_options.fixed_prompt = options.fixed_prompt;
         runtime = engine::create_engine(*artifact, engine_options);
@@ -275,11 +285,3 @@ std::unique_ptr<ModelImpl> create_model(
 }
 
 } // namespace wam::internal::gwp05
-
-namespace wam::internal {
-
-void register_gwp05(ModelRegistry & registry) {
-    registry.add(Arch::gwp05, gwp05::create_model);
-}
-
-} // namespace wam::internal

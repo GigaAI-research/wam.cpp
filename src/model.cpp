@@ -1,11 +1,10 @@
 #include "wam/model.h"
 
-#include "arch.h"
 #include "artifact/artifact_view.h"
 #include "model_internal.h"
-#include "model_registry.h"
 #include "artifact/gguf_reader.h"
 #include "policy/policy_spec.h"
+#include "runtime/model_registry.h"
 #include "wam/error.h"
 #include "wam/session.h"
 
@@ -120,15 +119,14 @@ void validate_runtime_config(const RuntimeConfig & config) {
     }
 }
 
-internal::Arch detect_architecture(
+std::string detect_architecture(
     const internal::artifact::ArtifactView & artifact) {
     const std::string value = artifact.require_string("general.architecture");
-    const internal::Arch architecture = internal::arch_from_name(value);
-    if (architecture == internal::Arch::unknown) {
+    if (value.empty()) {
         throw Error(ErrorCode::unsupported, "unsupported GGUF architecture",
                     {{"general.architecture", value}});
     }
-    return architecture;
+    return value;
 }
 
 } // namespace
@@ -151,21 +149,20 @@ Model Model::load(const std::string & artifact_path,
 
     internal::artifact::ArtifactView artifact =
         internal::artifact::ArtifactView::open(artifact_path);
-    const internal::Arch architecture = detect_architecture(artifact);
+    const std::string architecture = detect_architecture(artifact);
     std::optional<PolicySpec> policy_spec =
         internal::policy::try_read_policy_spec(artifact);
 
-    const internal::ModelFactory * factory =
+    const internal::ArchitectureDescriptor * descriptor =
         internal::model_registry().find(architecture);
-    if (factory == nullptr) {
+    if (descriptor == nullptr) {
         throw Error(ErrorCode::unsupported,
-                    "GGUF architecture is recognized but not compiled",
-                    {{"general.architecture",
-                      std::string(internal::arch_name(architecture))}});
+                    "GGUF architecture is not registered or not compiled",
+                    {{"general.architecture", architecture}});
     }
 
     ModelInfo info;
-    info.architecture = std::string(internal::arch_name(architecture));
+    info.architecture = architecture;
     info.artifact_path = artifact.path();
     info.artifact_bytes = artifact.file_size();
     info.backend = config.backend;
@@ -174,8 +171,9 @@ Model Model::load(const std::string & artifact_path,
 
     std::unique_ptr<internal::ModelImpl> impl = translate_internal_errors(
         "model creation", [&] {
-            return (*factory)(config, std::move(info), std::move(policy_spec),
-                              artifact.shared_gguf());
+            return descriptor->factory(
+                config, std::move(info), std::move(policy_spec),
+                artifact.shared_gguf());
         });
     return internal::adopt_model(std::move(impl));
 }

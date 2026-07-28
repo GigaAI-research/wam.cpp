@@ -8,7 +8,6 @@
 namespace wam::internal {
 
 class GgufReader;
-class ModelRegistry;
 
 namespace fastwam {
 
@@ -19,7 +18,5 @@ std::unique_ptr<ModelImpl> create_model(
     std::shared_ptr<GgufReader> reader);
 
 } // namespace fastwam
-
-void register_fastwam(ModelRegistry & registry);
 
 } // namespace wam::internal

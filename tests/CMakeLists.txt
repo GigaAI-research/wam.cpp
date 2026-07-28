@@ -12,6 +12,7 @@ foreach(target IN ITEMS
         wam_artifact
         wam_policy
         wam_backend_ggml
+        wam_backend_ggml_impl
         wam_runtime_base
         wam_core)
     if(NOT TARGET ${target})
@@ -46,6 +47,15 @@ wam_add_test(wam_header_version_contract contracts/header_version.cpp)
 wam_add_test(wam_header_c_api_contract contracts/header_c_api.cpp)
 wam_add_test(wam_types_unit unit/types.cpp)
 wam_add_test(wam_registry_unit unit/model_registry.cpp)
+add_executable(wam_runtime_backend_unit unit/runtime_backend.cpp)
+target_link_libraries(wam_runtime_backend_unit PRIVATE wam::core)
+target_include_directories(wam_runtime_backend_unit PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(wam_runtime_backend_unit PRIVATE cxx_std_17)
+target_compile_options(wam_runtime_backend_unit PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+add_test(NAME wam_runtime_backend_unit COMMAND wam_runtime_backend_unit)
 add_executable(wam_model_lifecycle
     integration/model_lifecycle.cpp
     fixtures/fake_public_model.cpp)

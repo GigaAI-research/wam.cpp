@@ -53,6 +53,15 @@ struct FixedPrompt {
 struct DebugDumpConfig {
     bool enabled = false;
     std::string directory;
+    bool audit_graph_dtypes = false;
+};
+
+struct RuntimeTuningConfig {
+    bool prefix_cache = true;
+    bool action_prompt_cache = true;
+    bool prompt_kv_cache = true;
+    bool graph_cache = true;
+    bool force_cpu_scheduler = false;
 };
 
 struct RuntimeConfig {
@@ -66,6 +75,7 @@ struct RuntimeConfig {
     LogLevel log_level = LogLevel::warning;
     LoggerCallback logger;
     DebugDumpConfig debug_dump;
+    RuntimeTuningConfig tuning;
 };
 
 struct SessionConfig {

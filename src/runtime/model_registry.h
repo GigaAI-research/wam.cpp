@@ -1,11 +1,12 @@
 #pragma once
 
-#include "arch.h"
 #include "model_internal.h"
 
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace wam::internal {
@@ -18,17 +19,20 @@ using ModelFactory = std::function<std::unique_ptr<ModelImpl>(
     std::optional<policy::PolicySpec> policy_spec,
     std::shared_ptr<GgufReader> reader)>;
 
+struct ArchitectureDescriptor {
+    std::string architecture;
+    Capabilities capabilities;
+    ModelFactory factory;
+};
+
 class ModelRegistry {
 public:
-    void add(Arch arch, ModelFactory factory);
-    const ModelFactory * find(Arch arch) const noexcept;
+    void add(ArchitectureDescriptor descriptor);
+    const ArchitectureDescriptor * find(
+        std::string_view architecture) const;
 
 private:
-    struct ArchHash {
-        std::size_t operator()(Arch arch) const noexcept;
-    };
-
-    std::unordered_map<Arch, ModelFactory, ArchHash> factories_;
+    std::unordered_map<std::string, ArchitectureDescriptor> descriptors_;
 };
 
 ModelRegistry & model_registry();

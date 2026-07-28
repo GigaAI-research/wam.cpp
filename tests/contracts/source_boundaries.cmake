@@ -53,11 +53,29 @@ wam_assert_no_match(
     "FastWAM code depends on GWP05"
     "#[ \t]*include[ \t]*[<\"]models/gwp05/"
     ${fastwam_sources})
+wam_assert_no_match(
+    "model code reads hidden environment variables"
+    "(std::)?getenv[ \\t]*\\("
+    ${gwp05_sources}
+    ${fastwam_sources})
+wam_assert_no_match(
+    "model code writes directly to stdio"
+    "(std::)?f(printf|puts|write)[ \\t]*\\("
+    ${gwp05_sources}
+    ${fastwam_sources})
+
+file(GLOB_RECURSE backend_sources
+    "${WAM_SOURCE_DIR}/src/backends/*.h"
+    "${WAM_SOURCE_DIR}/src/backends/*.cpp")
+wam_assert_no_match(
+    "backend code depends on a concrete model, policy, or artifact parser"
+    "#[ \\t]*include[ \\t]*[<\"](models/|policy/|artifact/)"
+    ${backend_sources})
 
 set(core_model_sources
     "${WAM_SOURCE_DIR}/src/model.cpp"
     "${WAM_SOURCE_DIR}/src/model_internal.cpp"
-    "${WAM_SOURCE_DIR}/src/model_registry.cpp"
+    "${WAM_SOURCE_DIR}/src/runtime/model_registry.cpp"
     "${WAM_SOURCE_DIR}/src/models/builtin_modules.cpp"
     ${gwp05_sources}
     ${fastwam_sources})

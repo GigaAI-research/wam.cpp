@@ -2,6 +2,7 @@
 
 #include "ops.h"
 
+#include "backends/ggml/graph_context.h"
 #include "wam/error.h"
 
 #include "ggml-alloc.h"
@@ -196,11 +197,8 @@ std::vector<ggml_bf16_t> encode_first_frame(
         throw Error(ErrorCode::invalid_argument,
                     "FastWAM VAE input shape is invalid");
     }
-    ggml_init_params params{};
-    params.mem_size = 128u * 1024u * 1024u;
-    params.no_alloc = true;
-    ggml_context * ctx = ggml_init(params);
-    if (!ctx) throw Error(ErrorCode::resource_exhausted, "cannot create FastWAM VAE graph");
+    ggml_backend::GraphContext resources(128u * 1024u * 1024u);
+    ggml_context * ctx = resources.get();
 
     ggml_tensor * pixels = ggml_new_tensor_4d(
         ctx, GGML_TYPE_F32, g.image_width / 2, g.image_height / 2, 12, 1);
@@ -222,19 +220,11 @@ std::vector<ggml_bf16_t> encode_first_frame(
     ggml_set_output(output);
     ggml_cgraph * graph = ggml_new_graph_custom(ctx, 32768, false);
     ggml_build_forward_expand(graph, output);
-    ggml_gallocr_t allocator = ggml_gallocr_new(
-        ggml_backend_get_default_buffer_type(engine.backend()));
-    if (!allocator || !ggml_gallocr_alloc_graph(allocator, graph)) {
-        if (allocator) ggml_gallocr_free(allocator);
-        ggml_free(ctx);
-        throw Error(ErrorCode::resource_exhausted,
-                    "cannot allocate FastWAM VAE graph");
-    }
+    resources.allocate(
+        graph, ggml_backend_get_default_buffer_type(engine.backend()));
     ggml_backend_tensor_set(pixels, patchified_pixels.data(), 0,
                             patchified_pixels.size() * sizeof(float));
     if (ggml_backend_graph_compute(engine.backend(), graph) != GGML_STATUS_SUCCESS) {
-        ggml_gallocr_free(allocator);
-        ggml_free(ctx);
         throw Error(ErrorCode::inference_failed,
                     "FastWAM VAE graph execution failed");
     }
@@ -256,8 +246,6 @@ std::vector<ggml_bf16_t> encode_first_frame(
             result[offset] = ggml_fp32_to_bf16(centered * inverse_std);
         }
     }
-    ggml_gallocr_free(allocator);
-    ggml_free(ctx);
     return result;
 }
 

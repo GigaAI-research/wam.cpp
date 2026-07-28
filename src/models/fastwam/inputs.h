@@ -1,7 +1,7 @@
 #pragma once
 
 #include "models/fastwam/artifact.h"
-#include "models/common/model_types.h"
+#include "runtime/runtime_types.h"
 #include "policy/observation_processor.h"
 #include "wam/observation.h"
 #include "wam/prediction.h"
@@ -18,7 +18,7 @@ struct PreparedInputs {
     std::vector<std::int32_t> embedding_attention_mask;
 };
 
-using CoreAction = model_common::CoreAction;
+using CoreAction = runtime::CoreAction;
 
 PreparedInputs prepare_inputs(const Observation & inputs,
                               const ArtifactContract & artifact,

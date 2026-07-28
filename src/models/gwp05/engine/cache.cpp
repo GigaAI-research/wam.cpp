@@ -22,7 +22,7 @@ bool ensure_prefix_storage(Gwp05ModelArch & model) {
     const ggml_type value_type = (bf16_kv_cache_storage(model) ||
                                   bf16_attention_value_output(model))
         ? GGML_TYPE_BF16 : GGML_TYPE_F32;
-    if (action_prompt_cache_enabled()) {
+    if (action_prompt_cache_enabled(model)) {
         storage.action_prompt = ggml_new_tensor_2d(
             storage.ctx, native_bf16(model) ? GGML_TYPE_BF16 : GGML_TYPE_F32,
             cfg.expert_h, cfg.n_lang);
@@ -32,7 +32,7 @@ bool ensure_prefix_storage(Gwp05ModelArch & model) {
             storage.ctx, key_type, cfg.head_dim, cfg.n_prefix, cfg.n_q_heads));
         storage.values.push_back(ggml_new_tensor_3d(
             storage.ctx, value_type, cfg.n_prefix, cfg.head_dim, cfg.n_q_heads));
-        if (prompt_kv_cache_enabled()) {
+        if (prompt_kv_cache_enabled(model)) {
             storage.prompt_keys.push_back(ggml_new_tensor_3d(
                 storage.ctx, key_type, cfg.head_dim, cfg.n_lang, cfg.n_q_heads));
             storage.prompt_values.push_back(ggml_new_tensor_3d(
@@ -41,10 +41,10 @@ bool ensure_prefix_storage(Gwp05ModelArch & model) {
     }
     storage.buffer = ggml_backend_alloc_ctx_tensors(storage.ctx, model.backend);
     if (!storage.buffer) return false;
-    std::fprintf(stderr, "wam(gwp05): prefix cache %.1f MiB\n",
+    logf(model, LogLevel::info, "gwp05: prefix cache %.1f MiB",
                 ggml_backend_buffer_get_size(storage.buffer) / (1024.0 * 1024.0));
     if (storage.action_prompt) {
-        std::fprintf(stderr, "wam(gwp05): action prompt cache %.1f MiB\n",
+        logf(model, LogLevel::info, "gwp05: action prompt cache %.1f MiB",
                     ggml_nbytes(storage.action_prompt) / (1024.0 * 1024.0));
     }
     if (!storage.prompt_keys.empty()) {
@@ -53,7 +53,7 @@ bool ensure_prefix_storage(Gwp05ModelArch & model) {
             prompt_kv_mib += static_cast<double>(ggml_nbytes(storage.prompt_keys[index]));
             prompt_kv_mib += static_cast<double>(ggml_nbytes(storage.prompt_values[index]));
         }
-        std::fprintf(stderr, "wam(gwp05): prompt K/V cache %.1f MiB\n",
+        logf(model, LogLevel::info, "gwp05: prompt K/V cache %.1f MiB",
                     prompt_kv_mib / (1024.0 * 1024.0));
     }
     return true;
@@ -161,8 +161,8 @@ bool build_prefix_cache(Gwp05ModelArch & model,
         if (!native_bf16(model) || (tensor && tensor->type == GGML_TYPE_BF16)) {
             return true;
         }
-        std::fprintf(stderr,
-                     "wam(gwp05): native prefix tensor %s is %s, expected BF16\n",
+        logf(model, LogLevel::error,
+                     "gwp05: native prefix tensor %s is %s, expected BF16",
                      name, tensor ? ggml_type_name(tensor->type) : "null");
         return false;
     };
@@ -171,7 +171,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
         reference.size() != static_cast<size_t>(latent_width * latent_height * cfg.vae_z_dim) ||
         prompt.size() != static_cast<size_t>(cfg.n_lang * cfg.t5_hidden) ||
         prefix_tokens != cfg.n_prefix) {
-        std::fprintf(stderr, "wam(gwp05): prefix inputs do not match configured structural shapes\n");
+        logf(model, LogLevel::error, "gwp05: prefix inputs do not match configured structural shapes");
         return false;
     }
     if (!ensure_prefix_storage(model) ||
@@ -229,7 +229,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
             !require_native_bf16("visual_hidden_in", visual_hidden)) {
             return false;
         }
-        if (cache_debug_dump_enabled()) {
+        if (cache_debug_dump_enabled(model)) {
             graph.state_hidden_in = ggml_dup(ctx, state_hidden);
             graph.visual_hidden_in = ggml_dup(ctx, visual_hidden);
         }
@@ -238,7 +238,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
             graph.prompt_input, cfg.expert_h, 1,
             persistent_prompt ? model.prefix_storage->action_prompt : nullptr);
         // The text branch depends only on prompt_input and fixed text-embedder weights.
-        if (action_prompt_cache_enabled() && !persistent_prompt) {
+        if (action_prompt_cache_enabled(model) && !persistent_prompt) {
             graph.action_prompt = native_bf16(model) &&
                                   state_condition.text->type != GGML_TYPE_BF16
                 ? ggml_cast(ctx, state_condition.text, GGML_TYPE_BF16)
@@ -313,7 +313,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
             if (persistent_prompt) {
                 action_prompt_kv.k = model.prefix_storage->prompt_keys[layer];
                 action_prompt_kv.v = model.prefix_storage->prompt_values[layer];
-            } else if (prompt_kv_cache_enabled()) {
+            } else if (prompt_kv_cache_enabled(model)) {
                 action_prompt_kv = build_cross_kv(
                     ctx, model, action_prefix, state_condition.text);
             }
@@ -347,7 +347,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
                 graph.prompt_keys.push_back(action_prompt_kv.k);
                 graph.prompt_values.push_back(action_prompt_kv.v);
             }
-            if (cache_debug_dump_enabled()) {
+            if (cache_debug_dump_enabled(model)) {
                 graph.state_hidden_out.push_back(ggml_dup(ctx, state_hidden));
                 graph.visual_hidden_out.push_back(ggml_dup(ctx, visual_hidden));
             }
@@ -369,7 +369,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
             ggml_build_forward_expand(graph.cgraph, graph.prompt_keys[i]);
             ggml_build_forward_expand(graph.cgraph, graph.prompt_values[i]);
         }
-        if (cache_debug_dump_enabled()) {
+        if (cache_debug_dump_enabled(model)) {
             for (ggml_tensor * tensor : {graph.state_hidden_in, graph.visual_hidden_in}) {
                 ggml_set_output(tensor);
                 ggml_build_forward_expand(graph.cgraph, tensor);
@@ -384,20 +384,20 @@ bool build_prefix_cache(Gwp05ModelArch & model,
         ggml_graph_assign_uid(graph.cgraph);
         graph.alloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(model.backend));
         if (!graph.alloc || !ggml_gallocr_alloc_graph(graph.alloc, graph.cgraph)) return false;
-        audit_mixed_binary_nodes("prefix", graph.cgraph);
+        audit_mixed_binary_nodes(model, "prefix", graph.cgraph);
 
         PrefixStorage & storage = *model.prefix_storage;
         if (graph.keys.size() != static_cast<size_t>(cfg.n_layers) ||
             graph.values.size() != static_cast<size_t>(cfg.n_layers) ||
             storage.keys.size() != static_cast<size_t>(cfg.n_layers) ||
             storage.values.size() != static_cast<size_t>(cfg.n_layers) ||
-            (prompt_kv_cache_enabled() &&
+            (prompt_kv_cache_enabled(model) &&
              ((!persistent_prompt &&
                (graph.prompt_keys.size() != static_cast<size_t>(cfg.n_layers) ||
                 graph.prompt_values.size() != static_cast<size_t>(cfg.n_layers))) ||
               storage.prompt_keys.size() != static_cast<size_t>(cfg.n_layers) ||
               storage.prompt_values.size() != static_cast<size_t>(cfg.n_layers)))) {
-            std::fprintf(stderr, "wam(gwp05): prefix cache layer count does not match model layers\n");
+            logf(model, LogLevel::error, "gwp05: prefix cache layer count does not match model layers");
             return false;
         }
         if (storage.action_prompt &&
@@ -413,7 +413,7 @@ bool build_prefix_cache(Gwp05ModelArch & model,
                                  {cfg.n_prefix, cfg.head_dim, cfg.n_q_heads})) {
                 return false;
             }
-            if (prompt_kv_cache_enabled() &&
+            if (prompt_kv_cache_enabled(model) &&
                 (!tensor_shape_is(storage.prompt_keys[index], "prompt key",
                                   {cfg.head_dim, cfg.n_lang, cfg.n_q_heads}) ||
                  !tensor_shape_is(storage.prompt_values[index], "prompt value",
@@ -447,32 +447,32 @@ bool build_prefix_cache(Gwp05ModelArch & model,
     set_input(graph.visual_width, visual_positions.width.data(),
               visual_positions.width.size() * sizeof(int32_t));
     if (ggml_backend_graph_compute(model.backend, graph.cgraph) != GGML_STATUS_SUCCESS) return false;
-    if (cache_debug_dump_enabled()) {
-        debug_dump_tensor("prefix_state_hidden_in", graph.state_hidden_in);
-        debug_dump_tensor("prefix_visual_hidden_in", graph.visual_hidden_in);
-        debug_dump_tensor("prefix_projected_action_prompt", graph.action_prompt);
+    if (cache_debug_dump_enabled(model)) {
+        debug_dump_tensor(model, "prefix_state_hidden_in", graph.state_hidden_in);
+        debug_dump_tensor(model, "prefix_visual_hidden_in", graph.visual_hidden_in);
+        debug_dump_tensor(model, "prefix_projected_action_prompt", graph.action_prompt);
         for (int64_t layer = 0; layer < cfg.n_layers; ++layer) {
             char name[96];
             std::snprintf(name, sizeof(name), "prefix_layer_%02lld_state_hidden_out",
                           static_cast<long long>(layer));
-            debug_dump_tensor(name, graph.state_hidden_out[static_cast<size_t>(layer)]);
+            debug_dump_tensor(model, name, graph.state_hidden_out[static_cast<size_t>(layer)]);
             std::snprintf(name, sizeof(name), "prefix_layer_%02lld_visual_hidden_out",
                           static_cast<long long>(layer));
-            debug_dump_tensor(name, graph.visual_hidden_out[static_cast<size_t>(layer)]);
+            debug_dump_tensor(model, name, graph.visual_hidden_out[static_cast<size_t>(layer)]);
             std::snprintf(name, sizeof(name), "prefix_layer_%02lld_self_key",
                           static_cast<long long>(layer));
-            debug_dump_tensor(name, graph.keys[static_cast<size_t>(layer)]);
+            debug_dump_tensor(model, name, graph.keys[static_cast<size_t>(layer)]);
             std::snprintf(name, sizeof(name), "prefix_layer_%02lld_self_value",
                           static_cast<long long>(layer));
-            debug_dump_tensor(name, graph.values[static_cast<size_t>(layer)]);
+            debug_dump_tensor(model, name, graph.values[static_cast<size_t>(layer)]);
             if (graph.prompt_keys.size() == static_cast<size_t>(cfg.n_layers) &&
                 graph.prompt_values.size() == static_cast<size_t>(cfg.n_layers)) {
                 std::snprintf(name, sizeof(name), "prefix_layer_%02lld_prompt_key",
                               static_cast<long long>(layer));
-                debug_dump_tensor(name, graph.prompt_keys[static_cast<size_t>(layer)]);
+                debug_dump_tensor(model, name, graph.prompt_keys[static_cast<size_t>(layer)]);
                 std::snprintf(name, sizeof(name), "prefix_layer_%02lld_prompt_value",
                               static_cast<long long>(layer));
-                debug_dump_tensor(name, graph.prompt_values[static_cast<size_t>(layer)]);
+                debug_dump_tensor(model, name, graph.prompt_values[static_cast<size_t>(layer)]);
             }
         }
     }

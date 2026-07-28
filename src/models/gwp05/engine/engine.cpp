@@ -1,6 +1,7 @@
 #include "models/gwp05/engine/engine_internal.h"
 
 #include "wam/error.h"
+#include "runtime/telemetry.h"
 
 #include <algorithm>
 #include <cstring>
@@ -59,12 +60,6 @@ std::vector<float> embedding_as_f32(const Tensor & embedding) {
     return values;
 }
 
-void append_timing(Telemetry & output, const char * name, double milliseconds) {
-    if (milliseconds > 0.0) {
-        output.model_timings.push_back({name, milliseconds});
-    }
-}
-
 Telemetry public_stats(const Gwp05ModelArch & engine) {
     const EngineTelemetry & source = engine.stats;
     Telemetry output;
@@ -78,21 +73,21 @@ Telemetry public_stats(const Gwp05ModelArch & engine) {
     output.peak_device_memory_bytes =
         std::max(engine.resident_device_bytes,
                  engine.peak_component_device_bytes);
-    append_timing(output, "vision.preprocess", source.ms_vae_preprocess);
-    append_timing(output, "vision.graph", source.ms_vae_graph);
-    append_timing(output, "text.encoder", source.ms_umt5);
-    append_timing(output, "prefill.prefix_cache", source.ms_prefix_cache);
-    append_timing(output, "prefill.prefix_graph_build",
+    runtime::append_timing(output, "vision.preprocess", source.ms_vae_preprocess);
+    runtime::append_timing(output, "vision.graph", source.ms_vae_graph);
+    runtime::append_timing(output, "text.encoder", source.ms_umt5);
+    runtime::append_timing(output, "prefill.prefix_cache", source.ms_prefix_cache);
+    runtime::append_timing(output, "prefill.prefix_graph_build",
                   source.ms_prefix_graph_build);
-    append_timing(output, "prefill.prompt_projection",
+    runtime::append_timing(output, "prefill.prompt_projection",
                   source.ms_prompt_projection);
-    append_timing(output, "decode.action_graph_build",
+    runtime::append_timing(output, "decode.action_graph_build",
                   source.ms_action_graph_build);
     for (std::size_t index = 0;
          index < source.ms_denoise_steps.size(); ++index) {
         char name[64];
         std::snprintf(name, sizeof(name), "decode.denoise_step_%02zu", index);
-        append_timing(output, name, source.ms_denoise_steps[index]);
+        runtime::append_timing(output, name, source.ms_denoise_steps[index]);
     }
     return output;
 }
@@ -120,6 +115,9 @@ std::unique_ptr<EngineSessionState> make_session_state(
     state->metadata_only = resources.metadata_only;
     state->precision_policy = resources.precision_policy;
     state->dispatch = resources.dispatch;
+    state->tuning = resources.tuning;
+    state->logger = resources.logger;
+    state->debug_dumper = resources.debug_dumper;
     state->conversion_policy = resources.conversion_policy;
     state->n_threads = resources.n_threads;
     state->weights = resources.weights;
@@ -222,9 +220,16 @@ EnginePtr create_engine(const ArtifactContract & artifact,
                     "GWP artifact has no backing reader");
     }
     auto model = std::make_unique<EngineResources>();
+    model->logger = options.logger
+        ? options.logger
+        : std::make_shared<runtime::Logger>(RuntimeConfig{});
+    model->debug_dumper = options.debug_dump
+        ? options.debug_dump
+        : std::make_shared<ggml_backend::DebugDump>();
     model->backend_request = options.backend;
     model->device_index = options.device_index;
     model->prompt_cache_limit = options.prompt_cache_capacity;
+    model->tuning = options.tuning;
     model->language_mode = resolve_language_mode(options);
     model->dispatch = resolve_kernel_dispatch(
         options.compute_precision, options.backend,
@@ -350,10 +355,9 @@ EnginePtr create_engine(const ArtifactContract & artifact,
             break;
     }
 
-    std::fprintf(
-        stderr,
-        "wam(gwp05): profile=%s policy=%s layers=%lld hidden=%lld "
-        "action_hidden=%lld ref_tokens=%lld chunk=%d steps=%d\n",
+    logf(*model, LogLevel::info,
+        "gwp05: profile=%s policy=%s layers=%lld hidden=%lld "
+        "action_hidden=%lld ref_tokens=%lld chunk=%d steps=%d",
         execution_profile_name(model->dispatch.profile),
         artifact.conversion_policy.c_str(),
         static_cast<long long>(cfg.n_layers),
@@ -375,26 +379,27 @@ EnginePtr create_engine(const ArtifactContract & artifact,
 
 std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     if (metadata_only) {
-        std::fprintf(stderr, "wam(gwp05): predict is unavailable in metadata-only mode\n");
+        logf(*this, LogLevel::error,
+             "gwp05: predict is unavailable in metadata-only mode");
         return {};
     }
     using clock = std::chrono::steady_clock;
     stats = {};
     const auto total_begin = clock::now();
     if (!in.model_state) {
-        std::fprintf(stderr, "wam(gwp05): state is required\n");
+        logf(*this, LogLevel::error, "gwp05: state is required");
         return {};
     }
     for (int64_t i = 0; i < cfg.max_state_dim; ++i) {
         if (!std::isfinite(in.model_state[i])) {
-            std::fprintf(stderr, "wam(gwp05): state contains NaN/Inf\n");
+            logf(*this, LogLevel::error, "gwp05: state contains NaN/Inf");
             return {};
         }
     }
 
     std::vector<float> model_state(
         in.model_state, in.model_state + cfg.max_state_dim);
-    debug_dump("normalized_state", model_state, {cfg.max_state_dim});
+    debug_dump(*this, "normalized_state", model_state, {cfg.max_state_dim});
 
     const auto vision_begin = clock::now();
     const size_t latent_count = static_cast<size_t>(cfg.vae_z_dim) *
@@ -402,7 +407,8 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     std::vector<float> reference;
     if (in.precomputed_ref_latent) {
         if (in.precomputed_ref_latent_n != static_cast<int>(latent_count)) {
-            std::fprintf(stderr, "wam(gwp05): precomputed reference latent has %d values, expected %zu\n",
+            logf(*this, LogLevel::error,
+                         "gwp05: precomputed reference latent has %d values, expected %zu",
                          in.precomputed_ref_latent_n, latent_count);
             return {};
         }
@@ -412,7 +418,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
         reference = run_vae(*this, in);
     }
     if (reference.size() != latent_count) return {};
-    debug_dump("vae_latent", reference,
+    debug_dump(*this, "vae_latent", reference,
                {cfg.vae_z_dim, cfg.image_height / 16, cfg.image_width / 16});
     for (float value : reference) if (!std::isfinite(value)) return {};
     stats.ms_vision = std::chrono::duration<float, std::milli>(clock::now() - vision_begin).count();
@@ -424,7 +430,8 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     bool ran_t5 = false;
     if (in.precomputed_prompt_emb) {
         if (in.precomputed_prompt_tokens < 1 || in.precomputed_prompt_tokens > cfg.n_lang) {
-            std::fprintf(stderr, "wam(gwp05): invalid precomputed prompt token count %d\n",
+            logf(*this, LogLevel::error,
+                         "gwp05: invalid precomputed prompt token count %d",
                          in.precomputed_prompt_tokens);
             return {};
         }
@@ -436,19 +443,21 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
             fixed_prompt->mask != prompt_mask(in) ||
             !std::equal(fixed_prompt->tokens.begin(), fixed_prompt->tokens.end(),
                         in.lang_tokens)) {
-            std::fprintf(stderr, "wam(gwp05): token input does not match fixed prompt\n");
+            logf(*this, LogLevel::error,
+                 "gwp05: token input does not match fixed prompt");
             return {};
         }
         prompt = fixed_prompt->embedding;
         prompt_cache_hit = true;
     } else if (language_mode == LanguageExecutionMode::external_embedding) {
-        std::fprintf(stderr, "wam(gwp05): external_embedding policy requires an embedding\n");
+        logf(*this, LogLevel::error,
+             "gwp05: external_embedding policy requires an embedding");
         return {};
     } else {
         int valid_tokens = 0;
         if (!in.lang_tokens || in.n_lang < 1 || in.n_lang > cfg.n_lang ||
             !validate_prompt_mask(in, valid_tokens)) {
-            std::fprintf(stderr, "wam(gwp05): invalid raw prompt input\n");
+            logf(*this, LogLevel::error, "gwp05: invalid raw prompt input");
             return {};
         }
         if ((prompt_cache_hit = get_cached_prompt(in, prompt))) {
@@ -459,7 +468,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
         }
     }
     if (prompt.size() != static_cast<size_t>(cfg.n_lang) * cfg.t5_hidden) return {};
-    debug_dump("t5_embedding", prompt, {cfg.n_lang, cfg.t5_hidden});
+    debug_dump(*this, "t5_embedding", prompt, {cfg.n_lang, cfg.t5_hidden});
     for (float value : prompt) if (!std::isfinite(value)) return {};
     if (!in.precomputed_prompt_emb && !prompt_cache_hit) {
         put_cached_prompt(in, prompt);
@@ -476,12 +485,13 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     const char * runtime_backend_name = ggml_backend_name(backend);
     const bool use_prefix_cache = in.enable_prefix_cache && runtime_backend_name &&
         std::strstr(runtime_backend_name, "CUDA") != nullptr &&
-        !debug_dump_enabled() &&
-        std::getenv("WAM_GWP05_DISABLE_PREFIX_CACHE") == nullptr;
+        !debug_dump_enabled(*this) &&
+        tuning.prefix_cache;
     if (use_prefix_cache) {
         const auto prefix_begin = clock::now();
         if (!build_prefix_cache(*this, model_state, reference, prompt)) {
-            std::fprintf(stderr, "wam(gwp05): prefix cache build/compute failed\n");
+            logf(*this, LogLevel::error,
+                 "gwp05: prefix cache build/compute failed");
             return {};
         }
         stats.ms_prefix_cache = std::chrono::duration<float, std::milli>(
@@ -491,13 +501,15 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
 
     std::vector<float> action(static_cast<size_t>(cfg.action_chunk) * cfg.max_action_dim);
     if (!in.action_noise) {
-        std::fprintf(stderr, "wam(gwp05): prepared action noise is required\n");
+        logf(*this, LogLevel::error,
+             "gwp05: prepared action noise is required");
         return {};
     }
     std::copy(in.action_noise, in.action_noise + action.size(), action.begin());
     for (float value : action) {
         if (!std::isfinite(value)) {
-            std::fprintf(stderr, "wam(gwp05): action noise contains NaN/Inf\n");
+            logf(*this, LogLevel::error,
+                 "gwp05: action noise contains NaN/Inf");
             return {};
         }
     }
@@ -508,20 +520,20 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     const std::vector<float> & timesteps = schedule.timesteps;
     const std::vector<float> & sigmas = schedule.sigmas;
     stats.ms_denoise_steps.reserve(static_cast<size_t>(cfg.num_steps));
-    debug_dump("flow_timesteps", timesteps, {cfg.num_steps});
-    debug_dump("flow_sigmas", sigmas, {cfg.num_steps + 1});
-    const bool capture_steps = any_debug_dump_enabled() ||
-                               std::getenv("WAM_GWP05_DISABLE_MOT_GRAPH_CACHE") != nullptr;
+    debug_dump(*this, "flow_timesteps", timesteps, {cfg.num_steps});
+    debug_dump(*this, "flow_sigmas", sigmas, {cfg.num_steps + 1});
+    const bool capture_steps = any_debug_dump_enabled(*this) ||
+                               !tuning.graph_cache;
     const char * backend_name = ggml_backend_name(backend);
     const bool cuda_scheduler = backend_name && std::strstr(backend_name, "CUDA") != nullptr;
-    const bool cpu_scheduler = !cuda_scheduler ||
-                               std::getenv("WAM_GWP05_CPU_SCHEDULER") != nullptr;
+    const bool cpu_scheduler = !cuda_scheduler || tuning.force_cpu_scheduler;
     const bool use_unrolled_denoise = use_prefix_cache && !capture_steps && !cpu_scheduler &&
         dispatch.unrolled_denoise;
     if (use_unrolled_denoise) {
         const auto unrolled_begin = clock::now();
         if (!run_unrolled_action_denoise(*this, action, timesteps, sigmas)) {
-            std::fprintf(stderr, "wam(gwp05): unrolled denoise failed\n");
+            logf(*this, LogLevel::error,
+                 "gwp05: unrolled denoise failed");
             return {};
         }
         const float unrolled_ms = std::chrono::duration<float, std::milli>(
@@ -533,7 +545,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
         const auto step_begin = clock::now();
         char stage_name[64];
         std::snprintf(stage_name, sizeof(stage_name), "denoise_%02d_action_in", step);
-        debug_dump(stage_name, action, {cfg.action_chunk, cfg.max_action_dim});
+        debug_dump(*this, stage_name, action, {cfg.action_chunk, cfg.max_action_dim});
         const float dt = sigmas[step + 1] - sigmas[step];
         std::vector<float> prediction;
         const bool step_ok = use_prefix_cache
@@ -549,21 +561,22 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
                   (capture_steps || cpu_scheduler) ? &prediction : nullptr,
                   (capture_steps && !cpu_scheduler) ? &action : nullptr);
         if (!step_ok) {
-            std::fprintf(stderr, "wam(gwp05): MoT failed at denoise step %d\n", step);
+            logf(*this, LogLevel::error,
+                 "gwp05: MoT failed at denoise step %d", step);
             return {};
         }
         std::snprintf(stage_name, sizeof(stage_name), "denoise_%02d_dt", step);
-        debug_dump(stage_name, {dt}, {1});
+        debug_dump(*this, stage_name, {dt}, {1});
         if (cpu_scheduler) {
             for (size_t i = 0; i < action.size(); ++i) action[i] += dt * prediction[i];
         }
         if (capture_steps) {
-            if (step == 0) debug_dump("velocity_step0", prediction,
+            if (step == 0) debug_dump(*this, "velocity_step0", prediction,
                                       {cfg.action_chunk, cfg.max_action_dim});
             std::snprintf(stage_name, sizeof(stage_name), "denoise_%02d_velocity", step);
-            debug_dump(stage_name, prediction, {cfg.action_chunk, cfg.max_action_dim});
+            debug_dump(*this, stage_name, prediction, {cfg.action_chunk, cfg.max_action_dim});
             std::snprintf(stage_name, sizeof(stage_name), "denoise_%02d_action_out", step);
-            debug_dump(stage_name, action, {cfg.action_chunk, cfg.max_action_dim});
+            debug_dump(*this, stage_name, action, {cfg.action_chunk, cfg.max_action_dim});
         }
         stats.ms_denoise_steps.push_back(
             std::chrono::duration<float, std::milli>(clock::now() - step_begin).count());
@@ -578,7 +591,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
 
     stats.ms_total = std::chrono::duration<float, std::milli>(
         clock::now() - total_begin).count();
-    debug_dump("normalized_action", action,
+    debug_dump(*this, "normalized_action", action,
                {cfg.action_chunk, cfg.max_action_dim});
     return action;
 }

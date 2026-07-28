@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace wam::internal::model_common {
+namespace wam::internal::runtime {
 
 struct CoreAction {
     std::vector<float> values;
@@ -21,4 +21,4 @@ struct EngineInfo {
     std::vector<RuntimeComponentInfo> runtime_components;
 };
 
-} // namespace wam::internal::model_common
+} // namespace wam::internal::runtime

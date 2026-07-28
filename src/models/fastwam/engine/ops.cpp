@@ -1,17 +1,14 @@
 #include "ops.h"
 
+#include "backends/ggml/graph_ops.h"
+
 #include <cmath>
 
 namespace wam::internal::fastwam::ops {
 namespace {
 
-ggml_tensor * as_f32(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_F32 ? value : ggml_cast(ctx, value, GGML_TYPE_F32);
-}
-
-ggml_tensor * as_bf16(ggml_context * ctx, ggml_tensor * value) {
-    return value->type == GGML_TYPE_BF16 ? value : ggml_cast(ctx, value, GGML_TYPE_BF16);
-}
+using ggml_backend::as_bf16;
+using ggml_backend::as_f32;
 
 } // namespace
 

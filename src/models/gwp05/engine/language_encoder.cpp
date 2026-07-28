@@ -83,12 +83,9 @@ ggml_tensor * build_attention(
 
 bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
     if (!in.attention_mask && in.attention_mask_n != 0) {
-        std::fprintf(stderr, "wam(gwp05): T5 mask length is nonzero without a mask\n");
         return false;
     }
     if (in.attention_mask && in.attention_mask_n != in.n_lang) {
-        std::fprintf(stderr, "wam(gwp05): T5 mask length %d does not match token count %d\n",
-                     in.attention_mask_n, in.n_lang);
         return false;
     }
     valid_tokens = in.n_lang;
@@ -97,12 +94,10 @@ bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
         bool saw_padding = false;
         for (int i = 0; i < in.n_lang; ++i) {
             if (in.attention_mask[i] != 0 && in.attention_mask[i] != 1) {
-                std::fprintf(stderr, "wam(gwp05): T5 mask values must be zero or one\n");
                 return false;
             }
             if (in.attention_mask[i] == 1) {
                 if (saw_padding) {
-                    std::fprintf(stderr, "wam(gwp05): T5 mask must be a contiguous valid prefix\n");
                     return false;
                 }
                 ++valid_tokens;
@@ -112,7 +107,6 @@ bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
         }
     }
     if (valid_tokens == 0) {
-        std::fprintf(stderr, "wam(gwp05): T5 mask contains no valid tokens\n");
         return false;
     }
     return true;
@@ -120,12 +114,12 @@ bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
 
 std::vector<float> run_t5(Gwp05ModelArch & model, const EngineInputsView & in) {
     if (!component_is_loaded(model, WeightComponent::t5)) {
-        std::fprintf(stderr, "wam(gwp05): T5 requested while its weights are not resident\n");
+        logf(model, LogLevel::error, "gwp05: T5 requested while its weights are not resident");
         return {};
     }
     const Config & cfg = model.cfg;
     if (!in.lang_tokens || in.n_lang < 1 || in.n_lang > cfg.n_lang) {
-        std::fprintf(stderr, "wam(gwp05): lang token count %d outside [1,%lld]\n",
+        logf(model, LogLevel::error, "gwp05: lang token count %d outside [1,%lld]",
                      in.n_lang, static_cast<long long>(cfg.n_lang));
         return {};
     }
@@ -133,7 +127,7 @@ std::vector<float> run_t5(Gwp05ModelArch & model, const EngineInputsView & in) {
     if (!validate_prompt_mask(in, valid_tokens)) return {};
     for (int i = 0; i < valid_tokens; ++i) {
         if (in.lang_tokens[i] < 0 || in.lang_tokens[i] >= cfg.t5_vocab_size) {
-            std::fprintf(stderr, "wam(gwp05): token %d is outside T5 vocabulary\n", in.lang_tokens[i]);
+            logf(model, LogLevel::error, "gwp05: token %d is outside T5 vocabulary", in.lang_tokens[i]);
             return {};
         }
     }

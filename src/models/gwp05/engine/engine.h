@@ -2,7 +2,9 @@
 
 #include "models/gwp05/artifact.h"
 #include "models/gwp05/inputs.h"
-#include "models/common/model_types.h"
+#include "backends/ggml/debug_dump.h"
+#include "runtime/logger.h"
+#include "runtime/runtime_types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -55,13 +57,16 @@ struct EngineOptions {
     std::size_t prompt_cache_capacity = 0;
     LanguageRuntimeMode language_mode = LanguageRuntimeMode::tokens;
     std::optional<FixedPrompt> fixed_prompt;
+    RuntimeTuningConfig tuning;
+    std::shared_ptr<runtime::Logger> logger;
+    std::shared_ptr<ggml_backend::DebugDump> debug_dump;
 };
 
 struct EngineSessionOptions {
     bool enable_prefix_cache = true;
 };
 
-using EngineInfo = model_common::EngineInfo;
+using EngineInfo = runtime::EngineInfo;
 
 KernelDispatch resolve_kernel_dispatch(
     ComputePrecision precision, Backend backend,

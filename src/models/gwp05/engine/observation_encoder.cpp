@@ -13,8 +13,6 @@ std::vector<float> patchify_composite(const EngineInputsView & in,
     const int height = static_cast<int>(cfg.image_height);
     const int expected = width * height * 3;
     if (!in.composite_image || in.composite_image_n != expected) {
-        std::fprintf(stderr,
-                     "wam(gwp05): prepared composite image has invalid size\n");
         return {};
     }
 
@@ -204,15 +202,15 @@ std::vector<float> run_vae(Gwp05ModelArch & model, const EngineInputsView & in) 
         ggml_set_input(graph.pixels);
         ggml_tensor * hidden = vae_conv(
             ctx, model, "encoder.conv_in", graph.pixels, 1, 1);
-        if (debug_dump_enabled()) graph.conv_in_debug = ggml_dup(ctx, hidden);
+        if (debug_dump_enabled(model)) graph.conv_in_debug = ggml_dup(ctx, hidden);
         hidden = vae_down_block(ctx, model, 0, hidden, true, false, 160);
-        if (debug_dump_enabled()) graph.down0_debug = ggml_dup(ctx, hidden);
+        if (debug_dump_enabled(model)) graph.down0_debug = ggml_dup(ctx, hidden);
         hidden = vae_down_block(ctx, model, 1, hidden, true, true, 320);
-        if (debug_dump_enabled()) graph.down1_debug = ggml_dup(ctx, hidden);
+        if (debug_dump_enabled(model)) graph.down1_debug = ggml_dup(ctx, hidden);
         hidden = vae_down_block(ctx, model, 2, hidden, true, true, 640);
-        if (debug_dump_enabled()) graph.down2_debug = ggml_dup(ctx, hidden);
+        if (debug_dump_enabled(model)) graph.down2_debug = ggml_dup(ctx, hidden);
         hidden = vae_down_block(ctx, model, 3, hidden, false, false, 640);
-        if (debug_dump_enabled()) graph.down3_debug = ggml_dup(ctx, hidden);
+        if (debug_dump_enabled(model)) graph.down3_debug = ggml_dup(ctx, hidden);
         hidden = vae_residual(ctx, model, "encoder.mid_block.resnets.0", hidden);
         hidden = vae_mid_attention(ctx, model, hidden);
         hidden = vae_residual(ctx, model, "encoder.mid_block.resnets.1", hidden);
@@ -240,7 +238,7 @@ std::vector<float> run_vae(Gwp05ModelArch & model, const EngineInputsView & in) 
     const auto preprocess_begin = clock::now();
     const std::vector<float> patchified = patchify_composite(in, cfg);
     if (patchified.empty()) return {};
-    debug_dump("image_input", patchified,
+    debug_dump(model, "image_input", patchified,
                {12, cfg.image_height / 2, cfg.image_width / 2});
     ggml_backend_tensor_set(
         graph.pixels, patchified.data(), 0, patchified.size() * sizeof(float));
@@ -248,11 +246,11 @@ std::vector<float> run_vae(Gwp05ModelArch & model, const EngineInputsView & in) 
         clock::now() - preprocess_begin).count();
     const auto graph_begin = clock::now();
     if (ggml_backend_graph_compute(model.backend, graph.cgraph) != GGML_STATUS_SUCCESS) return {};
-    if (graph.conv_in_debug) debug_dump_tensor("vae_conv_in", graph.conv_in_debug);
-    if (graph.down0_debug) debug_dump_tensor("vae_down0", graph.down0_debug);
-    if (graph.down1_debug) debug_dump_tensor("vae_down1", graph.down1_debug);
-    if (graph.down2_debug) debug_dump_tensor("vae_down2", graph.down2_debug);
-    if (graph.down3_debug) debug_dump_tensor("vae_down3", graph.down3_debug);
+    if (graph.conv_in_debug) debug_dump_tensor(model, "vae_conv_in", graph.conv_in_debug);
+    if (graph.down0_debug) debug_dump_tensor(model, "vae_down0", graph.down0_debug);
+    if (graph.down1_debug) debug_dump_tensor(model, "vae_down1", graph.down1_debug);
+    if (graph.down2_debug) debug_dump_tensor(model, "vae_down2", graph.down2_debug);
+    if (graph.down3_debug) debug_dump_tensor(model, "vae_down3", graph.down3_debug);
 
     const int64_t latent_width = cfg.image_width / 16;
     const int64_t latent_height = cfg.image_height / 16;

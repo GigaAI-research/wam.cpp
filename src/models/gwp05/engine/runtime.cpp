@@ -1,5 +1,7 @@
 #include "models/gwp05/engine/engine_internal.h"
 
+#include "backends/ggml/tensor_io.h"
+
 #include "ggml-cpu.h"
 #ifdef GGML_USE_CUDA
 #include "ggml-cuda.h"
@@ -8,14 +10,9 @@
 #include "ggml-metal.h"
 #endif
 
-#include <cerrno>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <limits>
 #include <thread>
 
 namespace wam::internal::gwp05::engine {
@@ -29,97 +26,43 @@ const char * precision_policy_name(MotPrecisionPolicy policy) {
     return policy == MotPrecisionPolicy::NATIVE_BF16 ? "native-bf16" : "f32";
 }
 
-const char * debug_dump_directory() {
-    const char * directory = std::getenv("WAM_GWP05_CACHE_DUMP_DIR");
-    if (directory && *directory) return directory;
-    return std::getenv("WAM_GWP05_DUMP_DIR");
+void logf(const Gwp05ModelArch & model, LogLevel level,
+          const char * format, ...) {
+    if (!model.logger) return;
+    std::va_list arguments;
+    va_start(arguments, format);
+    model.logger->logv(level, format, arguments);
+    va_end(arguments);
 }
 
-void debug_dump(const char * name, const std::vector<float> & values,
+void debug_dump(const Gwp05ModelArch & model, const char * name,
+                const std::vector<float> & values,
                 const std::vector<int64_t> & shape) {
-    const char * directory = debug_dump_directory();
-    if (!directory || !*directory) return;
-    std::error_code error;
-    std::filesystem::create_directories(directory, error);
-    const std::filesystem::path path = std::filesystem::path(directory) / (std::string(name) + ".f32");
-    std::ofstream output(path, std::ios::binary);
-    if (!output) {
-        std::fprintf(stderr, "wam(gwp05): cannot write debug dump %s\n", path.c_str());
-        return;
-    }
-    output.write(reinterpret_cast<const char *>(values.data()),
-                 static_cast<std::streamsize>(values.size() * sizeof(float)));
-    if (!output) {
-        std::fprintf(stderr, "wam(gwp05): cannot write debug dump %s\n", path.c_str());
-        return;
-    }
-    const std::filesystem::path metadata_path =
-        std::filesystem::path(directory) / (std::string(name) + ".json");
-    std::ofstream metadata(metadata_path);
-    if (!metadata) {
-        std::fprintf(stderr, "wam(gwp05): cannot write debug metadata %s\n",
-                     metadata_path.c_str());
-        return;
-    }
-    const uint16_t byte_order_probe = 1;
-    const bool little_endian = *reinterpret_cast<const uint8_t *>(&byte_order_probe) == 1;
-    metadata << "{\"format\":\"gwp-f32-dump-v1\",\"dtype\":\"float32\",\"shape\":[";
-    for (size_t i = 0; i < shape.size(); ++i) {
-        if (i) metadata << ',';
-        metadata << shape[i];
-    }
-    metadata << "],\"elements\":" << values.size()
-             << ",\"byte_order\":\"" << (little_endian ? "little" : "big") << "\"}\n";
+    if (model.debug_dumper) model.debug_dumper->write(name, values, shape);
 }
 
-bool debug_dump_enabled() {
-    const char * directory = std::getenv("WAM_GWP05_DUMP_DIR");
-    return directory && *directory;
+bool debug_dump_enabled(const Gwp05ModelArch & model) {
+    return model.debug_dumper && model.debug_dumper->enabled();
 }
 
-bool cache_debug_dump_enabled() {
-    const char * directory = std::getenv("WAM_GWP05_CACHE_DUMP_DIR");
-    return directory && *directory;
+bool cache_debug_dump_enabled(const Gwp05ModelArch & model) {
+    return debug_dump_enabled(model);
 }
 
-bool any_debug_dump_enabled() {
-    return debug_dump_enabled() || cache_debug_dump_enabled();
+bool any_debug_dump_enabled(const Gwp05ModelArch & model) {
+    return debug_dump_enabled(model);
 }
 
-void audit_mixed_binary_nodes(const char * graph_name, ggml_cgraph * graph) {
-    if (!std::getenv("WAM_GWP05_AUDIT_DTYPES") || !graph) return;
-    for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
-        const ggml_tensor * node = ggml_graph_node(graph, i);
-        if (!node->src[0] || !node->src[1] ||
-            node->src[0]->type == node->src[1]->type) continue;
-        if (node->op != GGML_OP_ADD && node->op != GGML_OP_SUB &&
-            node->op != GGML_OP_MUL && node->op != GGML_OP_DIV) continue;
-        std::fprintf(
-            stderr,
-            "wam(gwp05): dtype audit graph=%s node=%d op=%s dst=%s src0=%s(%s) src1=%s(%s)\n",
-            graph_name, i, ggml_op_name(node->op), ggml_type_name(node->type),
-            ggml_type_name(node->src[0]->type), ggml_op_name(node->src[0]->op),
-            ggml_type_name(node->src[1]->type), ggml_op_name(node->src[1]->op));
+void audit_mixed_binary_nodes(const Gwp05ModelArch & model,
+                              const char * graph_name, ggml_cgraph * graph) {
+    if (model.debug_dumper) {
+        model.debug_dumper->audit_mixed_binary_nodes(graph_name, graph);
     }
 }
 
-void debug_dump_tensor(const char * name, ggml_tensor * tensor) {
-    if (!any_debug_dump_enabled() || !tensor ||
-        !tensor->buffer ||
-        (tensor->type != GGML_TYPE_F32 && tensor->type != GGML_TYPE_BF16)) return;
-    std::vector<float> values(ggml_nelements(tensor));
-    if (tensor->type == GGML_TYPE_F32) {
-        ggml_backend_tensor_get(tensor, values.data(), 0, values.size() * sizeof(float));
-    } else {
-        std::vector<ggml_bf16_t> raw(values.size());
-        ggml_backend_tensor_get(tensor, raw.data(), 0, raw.size() * sizeof(ggml_bf16_t));
-        ggml_bf16_to_fp32_row(raw.data(), values.data(), values.size());
-    }
-    std::vector<int64_t> shape;
-    for (int dimension = ggml_n_dims(tensor) - 1; dimension >= 0; --dimension) {
-        shape.push_back(tensor->ne[dimension]);
-    }
-    debug_dump(name, values, shape);
+void debug_dump_tensor(const Gwp05ModelArch & model, const char * name,
+                       ggml_tensor * tensor) {
+    if (model.debug_dumper) model.debug_dumper->write_tensor(name, tensor);
 }
 
 void replace_all(std::string & value, const char * source, const char * target) {
@@ -185,27 +128,12 @@ std::string compact_tensor_name(const std::string & full_name) {
     return component + "." + name;
 }
 
-bool action_prompt_cache_enabled() {
-    return std::getenv("WAM_GWP05_DISABLE_ACTION_PROMPT_CACHE") == nullptr;
+bool action_prompt_cache_enabled(const Gwp05ModelArch & model) {
+    return model.tuning.action_prompt_cache;
 }
 
-bool prompt_kv_cache_enabled() {
-    return action_prompt_cache_enabled() &&
-           std::getenv("WAM_GWP05_DISABLE_PROMPT_KV_CACHE") == nullptr;
-}
-
-size_t prompt_cache_capacity() {
-    const char * value = std::getenv("WAM_GWP05_PROMPT_CACHE_SIZE");
-    if (!value || !*value) return 4;
-    if (std::strchr(value, '-')) return 0;
-    errno = 0;
-    char * end = nullptr;
-    const unsigned long long parsed = std::strtoull(value, &end, 10);
-    if (errno == ERANGE || end == value || !end || *end ||
-        parsed > std::numeric_limits<size_t>::max()) {
-        return 0;
-    }
-    return static_cast<size_t>(parsed);
+bool prompt_kv_cache_enabled(const Gwp05ModelArch & model) {
+    return action_prompt_cache_enabled(model) && model.tuning.prompt_kv_cache;
 }
 
 bool single_token_timestep_enabled(const Gwp05ModelArch & model) {
@@ -213,7 +141,7 @@ bool single_token_timestep_enabled(const Gwp05ModelArch & model) {
 }
 
 bool cross_request_prompt_cache_enabled(const Gwp05ModelArch & model) {
-    return prompt_kv_cache_enabled() && model.prompt_cache_limit != 0;
+    return prompt_kv_cache_enabled(model) && model.prompt_cache_limit != 0;
 }
 
 bool native_bf16(const Gwp05ModelArch & model) {
@@ -235,25 +163,19 @@ bool native_action_region(const Gwp05ModelArch & model) {
 
 bool tensor_shape_is(const ggml_tensor * tensor, const char * name,
                      std::initializer_list<int64_t> shape) {
+    (void) name;
     if (!tensor) {
-        std::fprintf(stderr, "wam(gwp05): missing runtime tensor %s\n", name);
         return false;
     }
     size_t dimension = 0;
     for (int64_t expected : shape) {
         if (tensor->ne[dimension] != expected) {
-            std::fprintf(stderr,
-                         "wam(gwp05): runtime tensor %s dimension %zu is %lld, expected %lld\n",
-                         name, dimension, static_cast<long long>(tensor->ne[dimension]),
-                         static_cast<long long>(expected));
             return false;
         }
         ++dimension;
     }
     for (; dimension < GGML_MAX_DIMS; ++dimension) {
         if (tensor->ne[dimension] != 1) {
-            std::fprintf(stderr, "wam(gwp05): runtime tensor %s has an unexpected dimension %zu\n",
-                         name, dimension);
             return false;
         }
     }
@@ -267,7 +189,7 @@ bool prefix_storage_is_valid(const Gwp05ModelArch & model) {
     const Config & cfg = model.cfg;
     const PrefixStorage * storage = model.prefix_storage.get();
     if (!storage) {
-        std::fprintf(stderr, "wam(gwp05): cached action requested without prefix storage\n");
+        logf(model, LogLevel::error, "gwp05: cached action requested without prefix storage");
         return false;
     }
     const size_t layers = static_cast<size_t>(cfg.n_layers);
@@ -277,22 +199,22 @@ bool prefix_storage_is_valid(const Gwp05ModelArch & model) {
                                            bf16_attention_value_output(model))
         ? GGML_TYPE_BF16 : GGML_TYPE_F32;
     if (storage->keys.size() != layers || storage->values.size() != layers) {
-        std::fprintf(stderr, "wam(gwp05): prefix K/V layer count does not match model layers\n");
+        logf(model, LogLevel::error, "gwp05: prefix K/V layer count does not match model layers");
         return false;
     }
-    if (action_prompt_cache_enabled() &&
+    if (action_prompt_cache_enabled(model) &&
         !tensor_shape_is(storage->action_prompt, "projected action prompt",
                          {cfg.expert_h, cfg.n_lang})) {
         return false;
     }
-    if (action_prompt_cache_enabled() && storage->action_prompt->type !=
+    if (action_prompt_cache_enabled(model) && storage->action_prompt->type !=
             (native_bf16(model) ? GGML_TYPE_BF16 : GGML_TYPE_F32)) {
-        std::fprintf(stderr, "wam(gwp05): projected action prompt dtype mismatches policy\n");
+        logf(model, LogLevel::error, "gwp05: projected action prompt dtype mismatches policy");
         return false;
     }
-    if (prompt_kv_cache_enabled() &&
+    if (prompt_kv_cache_enabled(model) &&
         (storage->prompt_keys.size() != layers || storage->prompt_values.size() != layers)) {
-        std::fprintf(stderr, "wam(gwp05): prompt K/V layer count does not match model layers\n");
+        logf(model, LogLevel::error, "gwp05: prompt K/V layer count does not match model layers");
         return false;
     }
     for (size_t layer = 0; layer < layers; ++layer) {
@@ -304,7 +226,7 @@ bool prefix_storage_is_valid(const Gwp05ModelArch & model) {
             storage->values[layer]->type != expected_value_type) {
             return false;
         }
-        if (prompt_kv_cache_enabled() &&
+        if (prompt_kv_cache_enabled(model) &&
             (!tensor_shape_is(storage->prompt_keys[layer], "prompt key",
                               {cfg.head_dim, cfg.n_lang, cfg.n_q_heads}) ||
              !tensor_shape_is(storage->prompt_values[layer], "prompt value",
@@ -321,45 +243,51 @@ bool init_backend(Gwp05ModelArch & model) {
 #ifdef GGML_USE_CUDA
     if (model.backend_request == Backend::automatic ||
         model.backend_request == Backend::cuda) {
-        model.backend = ggml_backend_cuda_init(model.device_index);
+        model.backend_context.reset(
+            ggml_backend_cuda_init(model.device_index));
+        model.backend = model.backend_context.get();
     }
-    if (model.backend) std::fprintf(stderr, "wam(gwp05): using CUDA backend\n");
+    if (model.backend) logf(model, LogLevel::info, "gwp05: using CUDA backend");
 #endif
 #ifdef GGML_USE_METAL
-    if (!model.backend) model.backend = ggml_backend_metal_init();
-    if (model.backend) std::fprintf(stderr, "wam(gwp05): using Metal backend\n");
+    if (!model.backend) {
+        model.backend_context.reset(ggml_backend_metal_init());
+        model.backend = model.backend_context.get();
+    }
+    if (model.backend) logf(model, LogLevel::info, "gwp05: using Metal backend");
 #endif
     if (!model.backend && model.backend_request == Backend::cuda) {
-        std::fprintf(stderr,
-                     "wam(gwp05): requested CUDA backend is unavailable\n");
+        logf(model, LogLevel::error,
+                     "gwp05: requested CUDA backend is unavailable");
         return false;
     }
     if (!model.backend && model.backend_request == Backend::automatic) {
-        model.backend = ggml_backend_cpu_init();
+        model.backend_context.reset(ggml_backend_cpu_init());
+        model.backend = model.backend_context.get();
         if (!model.backend) return false;
         ggml_backend_cpu_set_n_threads(model.backend, model.n_threads);
-        std::fprintf(stderr, "wam(gwp05): using CPU backend (%d threads; debug only)\n", model.n_threads);
+        logf(model, LogLevel::info, "gwp05: using CPU backend (%d threads; debug only)", model.n_threads);
     }
     const char * backend_name = ggml_backend_name(model.backend);
     const bool cuda = backend_name && std::strstr(backend_name, "CUDA") != nullptr;
     if (native_bf16(model) && !cuda) {
-        std::fprintf(stderr,
-                     "wam(gwp05): native-bf16 requires the validated CUDA backend; "
-                     "no implicit mixed or CPU fallback is allowed\n");
+        logf(model, LogLevel::error,
+                     "gwp05: native-bf16 requires the validated CUDA backend; "
+                     "no implicit mixed or CPU fallback is allowed");
         return false;
     }
 #ifndef WAM_GWP05_CUDNN
     if (native_vae_bf16(model)) {
-        std::fprintf(stderr,
-                     "wam(gwp05): BF16 VAE policy requires a build configured "
-                     "with WAM_GWP05_CUDNN=ON\n");
+        logf(model, LogLevel::error,
+                     "gwp05: BF16 VAE policy requires a build configured "
+                     "with WAM_GWP05_CUDNN=ON");
         return false;
     }
 #endif
-    std::fprintf(stderr,
-        "wam(gwp05): execution precision=%s weights=%s hidden=%s cache=%s "
+    logf(model, LogLevel::error,
+        "gwp05: execution precision=%s weights=%s hidden=%s cache=%s "
         "vae=%s math=%s attention=%s denoise=%s "
-        "graph_identity=stable fallback=none\n",
+        "graph_identity=stable fallback=none",
         precision_policy_name(model.precision_policy),
         native_bf16(model) ? "BF16" : "F32",
         native_bf16(model) ? "BF16" : "F32",
@@ -443,30 +371,11 @@ ggml_tensor * cache_compute_tensor(ggml_context * ctx, ggml_tensor * tensor,
 }
 
 void set_f32_tensor(ggml_tensor * tensor, const std::vector<float> & values) {
-    if (tensor->type == GGML_TYPE_F32) {
-        ggml_backend_tensor_set(
-            tensor, values.data(), 0, values.size() * sizeof(float));
-        return;
-    }
-    GGML_ASSERT(tensor->type == GGML_TYPE_BF16);
-    std::vector<ggml_bf16_t> converted(values.size());
-    ggml_fp32_to_bf16_row(values.data(), converted.data(), values.size());
-    ggml_backend_tensor_set(
-        tensor, converted.data(), 0, converted.size() * sizeof(ggml_bf16_t));
+    ggml_backend::set_f32(tensor, values);
 }
 
 void get_f32_tensor(ggml_tensor * tensor, std::vector<float> & values) {
-    values.resize(ggml_nelements(tensor));
-    if (tensor->type == GGML_TYPE_F32) {
-        ggml_backend_tensor_get(
-            tensor, values.data(), 0, values.size() * sizeof(float));
-        return;
-    }
-    GGML_ASSERT(tensor->type == GGML_TYPE_BF16);
-    std::vector<ggml_bf16_t> raw(values.size());
-    ggml_backend_tensor_get(
-        tensor, raw.data(), 0, raw.size() * sizeof(ggml_bf16_t));
-    ggml_bf16_to_fp32_row(raw.data(), values.data(), values.size());
+    values = ggml_backend::get_f32(tensor);
 }
 
 ggml_tensor * scheduler_step(ggml_context * ctx, Gwp05ModelArch & model,
@@ -536,22 +445,8 @@ EngineResources::~EngineResources() {
     prefix_graph.reset();
     prefix_storage.reset();
     vae_graph.reset();
-    for (ggml_backend_buffer_t & buffer : weight_buffers) {
-        if (buffer != nullptr) {
-            ggml_backend_buffer_free(buffer);
-        }
-        buffer = nullptr;
-    }
-    for (ggml_context *& context : weight_contexts) {
-        if (context != nullptr) {
-            ggml_free(context);
-        }
-        context = nullptr;
-    }
-    if (backend != nullptr) {
-        ggml_backend_free(backend);
-        backend = nullptr;
-    }
+    for (auto & store : weight_stores) store.reset();
+    backend = nullptr;
 }
 
 } // namespace wam::internal::gwp05::engine
