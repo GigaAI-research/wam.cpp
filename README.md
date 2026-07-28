@@ -14,8 +14,9 @@ load/create/predict/reset/free lifecycle. The current verified legacy F32 path a
 named RGB images and raw state, sends only a prepared composite image, normalized/padded state,
 and complete action noise into the engine, and returns decoded F32
 `[horizon, real_action_dim]` actions. Slice 7 adds the WebSocket/Protobuf server and
-RoboTwin client adapter; FastWAM execution remains unsupported, and no placeholder actions
-are returned.
+RoboTwin client adapter. FastWAM now has an opt-in CUDA/BF16 engine and verified
+LIBERO Gate B paths; unsupported profiles still fail explicitly and never return
+placeholder actions.
 
 ```bash
 cmake -S . -B build -DWAM_BUILD_TESTS=ON
@@ -36,6 +37,21 @@ The model entry points can be configured independently with `WAM_BUILD_GWP05` an
 `WAM_BUILD_FASTWAM`. Ignored upstream simulator directories remain managed by the eval setup
 scripts.
 
+Environment/runtime integration and deployable model readiness are tracked separately.
+FastWAM LIBERO passes its formal MuJoCo 3.3.2 four-suite gate: donor Python
+achieves `1935/2000` (`96.75%`) and wam.cpp achieves `1938/2000` (`96.90%`)
+on the same 50 ordered init states per task. See
+`eval/sim/FASTWAM_LIBERO_BASELINE_AUDIT.md` for the frozen manifests and
+interpretation.
+
+For FastWAM LIBERO-X, the client/server adapter, z-score PolicySpec, GGUF artifact gate,
+same-input numerical parity, and fixed-manifest donor/wam.cpp rollout agreement are complete.
+The audited step 50k training run has an invalid resumed cosine-scheduler trajectory and only
+two independent demonstrations for the exact frozen SCENE1 task, so its GGUF is an integration
+fixture rather than a supported model. A reliable LIBERO-X checkpoint must be retrained and
+pass the same gates before success-rate claims are published; see
+`eval/sim/FASTWAM_LIBEROX_REMOTE_EVAL.md`.
+
 Slice 4A through Slice 6 add opt-in external gates for a real GWP05 GGUF, the frozen donor tensor
 manifest, private-engine F32 stage parity, and public multi-session lifecycle parity. See
 `tests/reference/README.md`. These gates keep models and replay payloads out of
@@ -48,12 +64,13 @@ client infer, RPC, and server-total means were `132.29`, `130.77`, and `124.98 m
 A800 BF16 server. See `eval/sim/ROBOTWIN_REMOTE_EVAL.md` for the manifest digest, latency
 groups, and result paths.
 
-## Verified checkpoint (2026-07-26)
+## Verified checkpoint (2026-07-28)
 
-The current vertical implementation passes clean CPU and CUDA 12.4 builds. Both builds pass
-the 15-test default suite, including the WebSocket/Protobuf RPC fixture. The CUDA build also
-passes the legacy 32D artifact gate, the formal 14D RoboTwin artifact gate, and the independent
-A800 BF16 public-Session parity gate. A real prediction through the Python/C ABI bridge returns
-the expected `[48, 14]` action and preserves the engine's named vision, text, prefill, and
-decode timings. External GGUF, numerical fixtures, checkpoints, simulator checkouts, and rollout
-results remain outside Git.
+The current vertical implementation passes Release CPU and CUDA 12.4 builds. The CPU build
+passes all 20 configured tests. The A800 `sm_80` CUDA build passes all 24 configured tests,
+including WebSocket/Protobuf RPC, language-provider padding semantics, the formal GWP05
+RoboTwin BF16 public-Session parity gate, and the FastWAM LIBERO artifact and action-parity
+gates. A real prediction through the Python/C ABI bridge returns the expected `[48, 14]`
+GWP05 action and preserves the engine's named vision, text, prefill, and decode timings.
+External GGUF, numerical fixtures, checkpoints, simulator checkouts, and raw rollout results
+remain outside Git.

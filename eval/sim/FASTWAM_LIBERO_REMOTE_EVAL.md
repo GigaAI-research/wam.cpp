@@ -138,6 +138,20 @@ to BF16 as the model does, and sends the BF16-rounded values as F32 explicit act
 shape `[action.horizon, action.model_dim]`. Direct BF16 `torch.randn`, NumPy noise, an advancing
 generator, or per-episode seeds do not reproduce the donor.
 
+## Formal MuJoCo 3.3.2 full-suite result
+
+The v3 donor/wam.cpp comparison completed all four suites, all 40 tasks, and
+the same 50 ordered init states per task. The donor succeeded on `1935/2000`
+episodes (`96.75%`); wam.cpp succeeded on `1938/2000` (`96.90%`). The aggregate
+difference is three episodes, or 0.15 percentage points. Sixteen of 40 tasks
+have exactly identical success/failure episode sets; the remaining differences
+are evaluated together with the independent same-input numerical action gate,
+not by requiring chaotic closed-loop rollouts to be bitwise identical.
+
+The complete suite table, manifest SHA-256 values, latency summary, environment
+contract, and interpretation are frozen in
+`FASTWAM_LIBERO_BASELINE_AUDIT.md`. Raw results remain ignored by Git.
+
 The two-episode runner smoke used task 0, init states 0 and 1, and manifest SHA256
 `6a5e7bbe738f89fbe6e27f99a9618f0070990b47385dbed554cc36a15f334a7f`. Both episodes
 succeeded in 85 and 94 controller steps. The run produced 19 requests, server-total mean
@@ -229,8 +243,8 @@ task 0 reached `19/20` (`95%`) with manifest SHA256
 Spatial task 1, which scored `0/20` under v1, reached `4/5` (`80%`) with
 manifest SHA256
 `f1b2d1f4d845ff1f3e2d93eec3038b83387a926b6f6647a84756ae343bd3a974`.
-These runs confirm the v1 RNG mismatch was causal. A new task-aligned v2
-full-suite run is still required for a formal success rate. These diagnostics
-used MuJoCo 2.3.0 and remain invalid. The donor manager uses 50 trials per task, so its full four-suite
-contract contains 2,000 episodes, not the 800 episodes used by the invalidated
-v1 run.
+These runs confirm the v1 RNG mismatch was causal. They used MuJoCo 2.3.0 and
+remain invalid. The replacement task-aligned v3 full-suite evaluation under
+MuJoCo 3.3.2 is the formal result reported above. The donor manager uses 50
+trials per task, so its full four-suite contract contains 2,000 episodes, not
+the 800 episodes used by the invalidated v1 run.

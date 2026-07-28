@@ -1589,7 +1589,7 @@ donor 的部分 video K/V 和最后两个 velocity 中间 tensor 未通过其更
 
 ### 17.1 本轮已冻结
 
-- 0.5 最终目标仍是 GWP-0.5/FastWAM 对 LIBERO/LIBERO-X/RoboTwin 的六种组合；GWP-0.5 的 LIBERO/LIBERO-X 权重训练中，其他四种组合已有权重。
+- 0.5 最终目标仍是 GWP-0.5/FastWAM 对 LIBERO/LIBERO-X/RoboTwin 的六种组合。环境/runtime 适配状态与可发布 checkpoint 状态必须分别记录：GWP-0.5 的 LIBERO/LIBERO-X 权重训练中；FastWAM LIBERO-X 已完成 adapter、PolicySpec、artifact 和 parity 通路，但已审计的 step 50k 权重受错误恢复旧 cosine scheduler 及场景轨迹覆盖不足影响，只能作为集成 fixture，可靠权重待重新训练。不得因为存在 checkpoint 文件或 GGUF 就声明模型/环境组合完成正式支持。
 - PolicySpec 只描述 checkpoint 的外部输入输出与 pre/post-processing 契约，不保存 simulator、rollout 和模型内部 geometry。
 - 环境 raw key/语义转换分别属于 observation/action adaptation；wire 传原始 instruction，serving request bridge 只使用当前 profile/部署已经验证的 language path；共有图像/state/action 数值处理由具体 session 调用 C++ 无状态 policy 函数；模型数学属于 architecture session 私有实现。
 - 0.5 暂不设计 external-tokenizer manager 及其自动发现、下载、revision 解析、文件校验和跨 profile 生命周期。GWP05 RoboTwin 使用 server-owned 显式本地 UMT5 路径；依赖更多资源管理能力的 profile 显式 `Unsupported`。
@@ -1617,7 +1617,7 @@ donor 的部分 video K/V 和最后两个 velocity 中间 tensor 未通过其更
 6. 三套 FastWAM checkpoint 的准确 action horizon、video frame 数和 inference scheduler 参数，以及哪些 checkpoint/推理入口满足已冻结的 action-only/action-noise 公共契约。
 7. 各环境 `execute_steps` 的默认配置，以及 0.5 是否确实需要独立 gripper filter；replan/ensemble 暂不作为 0.5 公共组件。
 8. protocol、artifact schema 和 C ABI 的最终版本号；wire transport/session 语义已冻结，不再属于候选项。
-9. LIBERO-X 是否复用 LIBERO GGUF，还是必须使用独立微调 checkpoint 和统计量。
+9. FastWAM LIBERO-X 已确定必须使用独立微调 checkpoint 和 z-score 统计量，不复用 LIBERO min-max GGUF；仍待准备通过训练质量 Gate 的可靠 checkpoint，并重新执行 GGUF conversion 和正式评测。
 10. RoboTwin、LIBERO 和 LIBERO-X upstream checkout 的最终 URL、固定 revision、许可证和环境安装版本。
 
 这些问题可以改变 profile 内容或环境转换行为，但不能改变本文确定的依赖方向：architecture session 只依赖模型结构和 PolicySpec；公共 policy 函数只依赖 PolicySpec 和 tensor/image 输入；observation/action adaptation 只依赖 simulator/controller 与 PolicySpec，不依赖模型名称；serving compatibility checker 只依赖 environment contract 与 PolicySpec，不进入 C++ model/policy 计算路径。

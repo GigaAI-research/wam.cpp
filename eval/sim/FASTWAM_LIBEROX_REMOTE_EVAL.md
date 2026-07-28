@@ -1,5 +1,28 @@
 # FastWAM LIBERO-X Remote Evaluation
 
+## Current status
+
+The LIBERO-X environment integration is complete: the client/server adapter,
+z-score PolicySpec, GGUF artifact checks, same-input donor/wam.cpp action
+parity, and fixed-manifest rollout path have all been exercised. Model
+readiness is still pending.
+
+The existing `step_050000.pt` and its converted GGUF are integration fixtures,
+not release or benchmark checkpoints. A training audit found that the run
+restored a cosine scheduler with the old `T_max=28500`; its learning rate
+reached the minimum around step 30k and then increased again. The frozen task 0
+was present in training, but its exact SCENE1 layout had only two independent
+demonstrations. The run also had no held-out validation and no training-time
+simulator evaluation. Consequently, the recorded `0/10` establishes
+donor/wam.cpp result agreement only and must not be used to judge wam.cpp model
+quality.
+
+The commands below preserve the completed integration evidence. Do not publish
+the step 50k GGUF as a supported LIBERO-X model or extend it into a formal
+benchmark. After retraining with a corrected scheduler, convert the new
+checkpoint to GGUF and repeat the artifact, same-input action, fixed-manifest,
+success-rate, and latency gates.
+
 Two distinct evaluation profiles exist:
 
 - the initial integration smoke reused the released LIBERO checkpoint as a
@@ -12,7 +35,7 @@ training config sets `norm_default_mode: z-score` and points to the LIBERO-X
 dataset. Environment-specific image keys and gripper postprocessing remain in
 the LIBERO-X client; the C++ engine and GGUF contain no environment branch.
 
-## Specialized artifact
+## Audited integration artifact
 
 ```bash
 PYTHONPATH=$PWD/build-gate-b-serving-checkpoint-cuda/_deps/llama-src/gguf-py \

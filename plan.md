@@ -570,6 +570,12 @@ server 做权威 PolicySpec/EnvironmentContract compatibility check；client 持
 
 ## 18. 下一步
 
-Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。原 LIBERO v1 runner 使用逐 episode 变化的环境 seed 和 advancing NumPy F32 noise，v2 runner 又错误地使用 direct BF16 `torch.randn`；两者都不符合 donor 每次 predict 执行 `torch.randn(F32) -> BF16` 的固定 seed 42 契约，已有 LIBERO rollout 结果均不能作为正式 parity。MuJoCo 3.3.2 的完整 v3 对照正在按四个 suite、每 task 50 trials 重跑，并保留逐 init-state 成败集合。
+Slice 6、Gate A、Slice 7、GWP05 RoboTwin 100 次正式评测，以及 FastWAM LIBERO Gate B 数值、serving 和固定 manifest runner 均已完成。原 LIBERO v1 runner 使用逐 episode 变化的环境 seed 和 advancing NumPy F32 noise，v2 runner 又错误地使用 direct BF16 `torch.randn`；两者都不符合 donor 每次 predict 执行 `torch.randn(F32) -> BF16` 的固定 seed 42 契约，因此只保留为无效诊断。
 
-FastWAM RoboTwin 3-camera/14D/z-score profile、真实 GGUF artifact gate，以及专用 LIBERO-X z-score artifact、environment adapter、同输入 action Gate 和固定 manifest runner 已完成。LIBERO-X LEVEL1 上游自然顺序 task 0 的 10 个 init states 使用 manifest `458b441e34d2566333430db97848b537e4967a32cea7f2889486a80f7897e5c1` 完成 donor/wam.cpp 对照：两者均为 `0/10`，逐状态判定 `10/10` 一致；donor/wam rollout 分别为 `1223.51/883.79 s`。下一步不是放宽数值容差，而是先审计该 checkpoint 对应训练分布和任务覆盖，再用同一 runner 扩展到多个 LEVEL1 tasks；同时等待正在运行的 LIBERO v3 全 suite 对照完成并汇总。
+MuJoCo 3.3.2 的完整 v3 对照已完成四个 suite、40 个 task、每 task 50 个相同 init states，共 2,000 episodes。donor Python 为 `1935/2000`（`96.75%`），wam.cpp 为 `1938/2000`（`96.90%`），总差异为 `+3/2000`；16/40 个 task 的 50 个逐状态成败集合完全一致。结合已冻结的同输入 action 数值 Gate，FastWAM LIBERO 通过 0.5 simulator quality-parity gate。正式 manifest digest、suite 结果和延迟口径记录于 `eval/sim/FASTWAM_LIBERO_BASELINE_AUDIT.md`，原始 request/episode/result 文件继续排除在 Git 外。
+
+FastWAM RoboTwin 3-camera/14D/z-score profile，以及 LIBERO-X 的 z-score artifact contract、environment adapter、同输入 action Gate 和固定 manifest runner 已完成。LIBERO-X LEVEL1 上游自然顺序 task 0 的 10 个 init states 使用 manifest `458b441e34d2566333430db97848b537e4967a32cea7f2889486a80f7897e5c1` 完成 donor/wam.cpp 对照：两者均为 `0/10`，逐状态判定 `10/10` 一致；donor/wam rollout 分别为 `1223.51/883.79 s`。这证明 LIBERO-X 环境接入和 donor/wam runtime parity，不构成模型效果验收。
+
+LIBERO-X `step_050000.pt` 的训练审计确认它来自 LIBERO-X z-score 训练，但不能作为 0.5 的正式 benchmark checkpoint：当前 task 0 虽有 8 条同指令演示，精确 SCENE1 只有 2 条独立轨迹；训练没有 held-out validation 或 simulator eval；更关键的是从 30k run 的 step 5k 恢复完整状态时继承了旧 cosine scheduler 的 `T_max=28500`，导致学习率在约 30k 降至最低后重新升高，step 50k 和 step 60k 均处于非预期 reheating 阶段。因此当前状态冻结为“LIBERO-X environment/runtime 已适配，可靠的 LIBERO-X model checkpoint 待准备”，不得把 `0/10` 归因于 wam.cpp，也不得将现有 step 50k GGUF 发布为支持权重。
+
+下一步先修正训练 resume/scheduler 契约并重新训练 FastWAM LIBERO-X。新 checkpoint 必须具有可追溯 config/code revision、正确的独立 z-score stats、held-out 或训练期 simulator 评测记录，并先在 donor Python 上通过冻结 manifest；之后才重新转换 GGUF，依次执行 inspector/artifact、同输入 action parity、donor/wam 同 manifest rollout 和正式成功率/延迟评测。GWP05 LIBERO/LIBERO-X 则等待对应权重完成后，与该重训模型一起进入下一轮 profile、GGUF 和 simulator 适配。
