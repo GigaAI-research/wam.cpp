@@ -7,7 +7,9 @@
 #include <string>
 
 namespace wam::internal {
-class GgufReader;
+namespace artifact {
+class ArtifactView;
+}
 }
 
 namespace wam::internal::policy {
@@ -41,7 +43,8 @@ using ::wam::TensorLayout;
 inline constexpr std::uint32_t kPolicySpecSchemaVersion =
     ::wam::kPolicySpecSchemaVersion;
 
-std::optional<PolicySpec> try_read_policy_spec(const GgufReader & reader);
+std::optional<PolicySpec> try_read_policy_spec(
+    const artifact::ArtifactView & artifact);
 void validate_policy_spec(const PolicySpec & spec);
 std::size_t policy_image_count(const PolicySpec & spec) noexcept;
 const ImageTransformSpec & require_image_spec(const PolicySpec & spec,

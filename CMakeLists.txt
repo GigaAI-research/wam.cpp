@@ -16,6 +16,7 @@ option(WAM_BUILD_GWP05 "Build the GWP05 architecture entry point" ON)
 option(WAM_BUILD_FASTWAM "Build the FastWAM architecture entry point" ON)
 option(WAM_BUILD_TESTS "Build wam.cpp contract tests" ON)
 option(WAM_BUILD_SERVING "Build the C ABI used by evaluation servers" ON)
+option(WAM_BUILD_APPS "Build artifact inspection and validation tools" ON)
 option(WAM_CUDA "Build the pinned ggml CUDA backend" OFF)
 option(WAM_CUDNN "Enable the validated GWP05 BF16 VAE path" OFF)
 set(WAM_TEST_GWP05_REAL_GGUF "" CACHE FILEPATH
@@ -87,17 +88,21 @@ if(WAM_CUDA)
 endif()
 
 add_library(wam_artifact OBJECT
-    src/models/common/gguf_reader.cpp)
+    src/artifact/artifact_view.cpp
+    src/artifact/gguf_reader.cpp
+    src/artifact/manifest.cpp
+    src/artifact/tensor_spec.cpp)
 add_library(wam::artifact ALIAS wam_artifact)
 wam_configure_internal_target(wam_artifact)
 target_link_libraries(wam_artifact PRIVATE wam::backend_ggml)
 
 add_library(wam_policy OBJECT
-    src/models/common/input_validation.cpp
-    src/policy/action_ops.cpp
+    src/policy/tensor_input.cpp
+    src/policy/action_decoder.cpp
+    src/policy/action_noise.cpp
     src/policy/image_ops.cpp
     src/policy/language_ops.cpp
-    src/policy/observation_ops.cpp
+    src/policy/observation_processor.cpp
     src/policy/policy_spec.cpp
     src/policy/state_ops.cpp)
 add_library(wam::policy ALIAS wam_policy)
@@ -241,6 +246,21 @@ if(WAM_BUILD_SERVING)
     else()
         message(WARNING "protoc was not found; wam.desc will not be generated")
     endif()
+endif()
+
+if(WAM_BUILD_APPS)
+    foreach(app IN ITEMS inspect validate)
+        add_executable(wam-${app} apps/${app}.cpp)
+        target_link_libraries(wam-${app} PRIVATE wam::core)
+        target_include_directories(wam-${app} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/apps
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_compile_features(wam-${app} PRIVATE cxx_std_17)
+        target_compile_options(wam-${app} PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+        install(TARGETS wam-${app}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endforeach()
 endif()
 
 set(wam_install_targets wam_core wam_core_archive)

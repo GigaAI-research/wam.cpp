@@ -2,7 +2,7 @@
 #include "support/temp_file.h"
 #include "support/test_utils.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "policy/policy_spec.h"
 
 int main() {
@@ -11,14 +11,18 @@ int main() {
     wam::test::TempFile file("policy-spec");
     wam::test::MetadataFixture fixture = wam::test::valid_policy_fixture();
     fixture.write(file.string());
-    const auto reader = wam::internal::GgufReader::open(file.string());
+    const auto artifact =
+        wam::internal::artifact::ArtifactView::open(file.string());
 
     const auto loaded =
-        wam::internal::policy::try_read_policy_spec(*reader);
+        wam::internal::policy::try_read_policy_spec(artifact);
     require(loaded.has_value(), "valid PolicySpec was not detected");
     const wam::internal::policy::PolicySpec & spec = *loaded;
-    require(spec.identity.artifact_schema_version == 2,
+    require(spec.identity.artifact_schema_version == 3,
             "schema version changed");
+    require(spec.images.resample_boundary ==
+                wam::ResampleBoundaryMode::truncate,
+            "resample boundary was not loaded");
     require(spec.identity.profile == "synthetic_2cam_joint",
             "profile was not loaded");
     require(wam::internal::policy::policy_image_count(spec) == 2,
@@ -55,9 +59,9 @@ int main() {
     legacy.set_string("general.architecture", "gwp05");
     legacy.set_f32_tensor("legacy.weight", {1.0F});
     legacy.write(legacy_file.string());
-    const auto legacy_reader =
-        wam::internal::GgufReader::open(legacy_file.string());
-    require(!wam::internal::policy::try_read_policy_spec(*legacy_reader)
+    const auto legacy_artifact =
+        wam::internal::artifact::ArtifactView::open(legacy_file.string());
+    require(!wam::internal::policy::try_read_policy_spec(legacy_artifact)
                  .has_value(),
             "artifact without schema marker must remain a legacy candidate");
     return 0;

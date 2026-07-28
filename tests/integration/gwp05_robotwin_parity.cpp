@@ -1,4 +1,4 @@
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "models/gwp05/artifact.h"
 #include "models/gwp05/inputs.h"
 #include "policy/policy_spec.h"
@@ -197,10 +197,12 @@ int main(int argc, char ** argv) {
     ErrorMetrics image_metrics;
     ErrorMetrics state_metrics;
     {
+        const auto artifact_view =
+            wam::internal::artifact::ArtifactView::open(model_path.string());
         std::shared_ptr<wam::internal::GgufReader> reader =
-            wam::internal::GgufReader::open(model_path.string());
+            artifact_view.shared_gguf();
         const std::optional<policy::PolicySpec> parsed =
-            policy::try_read_policy_spec(*reader);
+            policy::try_read_policy_spec(artifact_view);
         require(parsed.has_value(), "formal GGUF has no PolicySpec");
         spec = *parsed;
         const std::shared_ptr<const gwp05::ArtifactContract> artifact =

@@ -1,4 +1,4 @@
-#include "models/common/input_validation.h"
+#include "policy/tensor_input.h"
 
 #include "wam/error.h"
 
@@ -6,7 +6,7 @@
 #include <cstring>
 #include <limits>
 
-namespace wam::internal {
+namespace wam::internal::policy {
 
 std::size_t checked_numel(const std::vector<std::int64_t> & shape,
                           const std::string & field) {
@@ -72,4 +72,4 @@ std::vector<std::int32_t> copy_i32_tensor(
     return result;
 }
 
-} // namespace wam::internal
+} // namespace wam::internal::policy

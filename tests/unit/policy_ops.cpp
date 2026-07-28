@@ -1,6 +1,7 @@
 #include "support/test_utils.h"
 
-#include "policy/action_ops.h"
+#include "policy/action_decoder.h"
+#include "policy/action_noise.h"
 #include "policy/image_ops.h"
 #include "policy/state_ops.h"
 
@@ -218,7 +219,7 @@ int main() {
     action_spec.stats.mask = {1, 1, 0};
     action_spec.recovery.kind = ActionRecoveryKind::add_current_state;
     action_spec.recovery.reference_state_indices = {0, -1};
-    const PolicyActionChunk decoded = decode_action_reference(
+    const DecodedActionChunk decoded = decode_action_reference(
         {-1.0F, 0.0F, 99.0F, 1.0F, 1.0F, 98.0F},
         {3.0F, 4.0F}, action_spec, action_spec.stats);
     require(decoded.horizon == 2 && decoded.action_dim == 2 &&
@@ -242,7 +243,7 @@ int main() {
     z_action_spec.stats.mean = {10.0F, -2.0F};
     z_action_spec.stats.stddev = {2.0F, 0.5F};
     z_action_spec.recovery.kind = ActionRecoveryKind::identity;
-    const PolicyActionChunk z_decoded = decode_action_reference(
+    const DecodedActionChunk z_decoded = decode_action_reference(
         {1.0F, 2.0F}, {}, z_action_spec, z_action_spec.stats);
     require(z_decoded.values == std::vector<float>({12.0F, -1.5F}),
             "action output clamp or z-score unnormalization changed");

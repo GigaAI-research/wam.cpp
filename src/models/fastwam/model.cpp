@@ -7,7 +7,7 @@
 #include "models/fastwam/inputs.h"
 #include "model_internal.h"
 #include "wam/error.h"
-#include "policy/action_ops.h"
+#include "policy/action_decoder.h"
 
 #include <chrono>
 #include <mutex>
@@ -21,7 +21,7 @@ Prediction make_prediction(const CoreAction & core,
                            const PreparedInputs & inputs,
                            const policy::PolicySpec & policy_spec) {
     policy::validate_core_action(core.values, policy_spec.action);
-    const policy::PolicyActionChunk action = policy::decode_action_reference(
+    const policy::DecodedActionChunk action = policy::decode_action_reference(
         core.values, inputs.observation.raw_state, policy_spec.action,
         policy_spec.action.stats);
     Prediction prediction;

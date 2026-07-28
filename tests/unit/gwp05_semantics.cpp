@@ -1,8 +1,9 @@
 #include "fixtures/metadata_fixture.h"
+#include "artifact/artifact_view.h"
 #include "support/temp_file.h"
 #include "support/test_utils.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "models/common/scheduler.h"
 #include "models/gwp05/semantics.h"
 #include "policy/policy_spec.h"
@@ -84,8 +85,9 @@ int main() {
     wam::test::MetadataFixture fixture =
         wam::test::valid_gwp05_policy_fixture();
     fixture.write(file.string());
-    const auto reader = wam::internal::GgufReader::open(file.string());
-    auto spec = *wam::internal::policy::try_read_policy_spec(*reader);
+    const auto artifact =
+        wam::internal::artifact::ArtifactView::open(file.string());
+    auto spec = *wam::internal::policy::try_read_policy_spec(artifact);
     semantics::validate_policy_semantics(spec);
 
     spec.images.composition.width = 64;

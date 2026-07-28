@@ -7,8 +7,8 @@ from typing import Any, Mapping
 from gguf import GGUFValueType
 
 
-POLICY_PROFILE_FORMAT = "wam-policy-spec-profile-v1"
-POLICY_SCHEMA_VERSION = 2
+POLICY_PROFILE_FORMAT = "wam-policy-spec-profile-v2"
+POLICY_SCHEMA_VERSION = 3
 
 
 def add_policy_spec_metadata(writer: Any, profile: Mapping[str, Any]) -> None:
@@ -43,6 +43,8 @@ def add_policy_spec_metadata(writer: Any, profile: Mapping[str, Any]) -> None:
     writer.add_string("wam.input.image.color_space", images["color_space"])
     writer.add_string("wam.input.image.pixel_range", images["pixel_range"])
     writer.add_string("wam.input.image.tensor_layout", images["tensor_layout"])
+    writer.add_string(
+        "wam.input.image.resample_boundary", images["resample_boundary"])
 
     writer.add_uint32("wam.input.state.real_dim", state["real_dim"])
     writer.add_uint32("wam.input.state.model_dim", state["model_dim"])

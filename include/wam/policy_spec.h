@@ -8,7 +8,8 @@
 
 namespace wam {
 
-inline constexpr std::uint32_t kPolicySpecSchemaVersion = 2;
+inline constexpr std::uint32_t kPolicySpecSchemaVersion = 3;
+inline constexpr std::uint32_t kLegacyPolicySpecSchemaVersion = 2;
 
 enum class ResizeMode { none = 0, stretch, cover_center_crop };
 enum class InterpolationMode { nearest = 0, bilinear, bicubic };

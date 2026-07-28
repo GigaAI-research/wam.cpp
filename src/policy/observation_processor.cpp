@@ -1,6 +1,6 @@
-#include "policy/observation_ops.h"
+#include "policy/observation_processor.h"
 
-#include "policy/action_ops.h"
+#include "policy/action_noise.h"
 #include "policy/state_ops.h"
 
 namespace wam::internal::policy {

@@ -1,6 +1,7 @@
 #include "models/gwp05/artifact.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
+#include "artifact/tensor_spec.h"
 #include "wam/error.h"
 
 #include <algorithm>
@@ -107,6 +108,25 @@ void cross_check_stat(const GgufReader & reader, const std::string & legacy,
         incompatible("legacy normalization tensor conflicts with PolicySpec",
                      legacy, "payload mismatch");
     }
+}
+
+void validate_policy_stat_tensors(const GgufReader & reader,
+                                  const policy::PolicySpec & policy_spec) {
+    const auto validate_domain = [&](const std::string & domain,
+                                     std::size_t dimension) {
+        const std::vector<std::int64_t> shape = {
+            static_cast<std::int64_t>(dimension)};
+        for (const char * statistic : {"mean", "std", "lower", "upper"}) {
+            const std::string name =
+                "wam.norm." + domain + "." + statistic;
+            if (reader.find_tensor(name) != nullptr) {
+                artifact::validate_tensor(
+                    reader, {name, {DType::f32}, shape, true});
+            }
+        }
+    };
+    validate_domain("state", policy_spec.state.model_dim);
+    validate_domain("action", policy_spec.action.model_dim);
 }
 
 std::string read_conversion_policy(const GgufReader & reader) {
@@ -281,6 +301,7 @@ void validate_artifact(const ArtifactContract & artifact,
     }
 
     const GgufReader & reader = *artifact.reader;
+    validate_policy_stat_tensors(reader, policy_spec);
     if (!artifact.legacy_policy_spec &&
         !reader.has("gwp05.t5_max_length")) {
         incompatible("GWP artifact is missing text capacity",

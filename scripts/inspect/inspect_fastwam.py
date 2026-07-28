@@ -17,8 +17,8 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from common.fastwam_gguf import (
     CONVERSION_POLICY,
-    CONVERTER_REVISION,
     EXPECTED_COMPONENT_COUNTS,
+    SUPPORTED_CONVERTER_REVISIONS,
 )
 
 
@@ -37,25 +37,46 @@ def inspect(path: Path) -> dict[str, Any]:
     reader = gguf.GGUFReader(path, "r")
     if _field(reader, "general.architecture") != "fastwam":
         raise ContractError("artifact architecture is not fastwam")
+    revision = _field(reader, "fastwam.converter_revision")
     if _field(reader, "fastwam.conversion_policy") != CONVERSION_POLICY or \
-       _field(reader, "fastwam.converter_revision") != CONVERTER_REVISION:
+       revision not in SUPPORTED_CONVERTER_REVISIONS:
         raise ContractError("unsupported FastWAM converter revision")
     if _field(reader, "fastwam.variant") != "uncond_action_only":
         raise ContractError("unsupported FastWAM variant")
-    if int(_field(reader, "wam.artifact_schema_version")) != 2:
+    expected_schema = (
+        2 if revision == "wam-0.5-fastwam-policy-spec-v2" else 3)
+    if int(_field(reader, "wam.artifact_schema_version")) != expected_schema:
         raise ContractError("unsupported PolicySpec schema")
 
     geometry_keys = (
-        "image_height", "image_width", "num_cameras", "action_dim",
-        "proprio_dim", "action_horizon", "inference_steps",
+        "inference_steps",
         "latent_channels", "spatial_downsample", "temporal_downsample",
-        "context_len", "text_dim", "video_hidden_dim", "action_hidden_dim",
+        "text_dim", "video_hidden_dim", "action_hidden_dim",
         "num_layers", "num_heads", "attn_head_dim",
     )
     geometry = {
         key: int(_field(reader, f"fastwam.{key}"))
         for key in geometry_keys
     }
+    policy_geometry = {
+        "image_height": int(_field(
+            reader, "wam.input.image.composition.height")),
+        "image_width": int(_field(
+            reader, "wam.input.image.composition.width")),
+        "num_cameras": len(_field(reader, "wam.input.image.roles")),
+        "action_dim": int(_field(reader, "wam.output.action.model_dim")),
+        "proprio_dim": int(_field(reader, "wam.input.state.model_dim")),
+        "action_horizon": int(_field(reader, "wam.output.action.horizon")),
+        "context_len": int(_field(reader, "wam.input.language.max_tokens")),
+    }
+    legacy_geometry = revision == "wam-0.5-fastwam-policy-spec-v2"
+    for key, expected in policy_geometry.items():
+        field = reader.get_field(f"fastwam.{key}")
+        if field is None and legacy_geometry:
+            raise ContractError(f"missing metadata: fastwam.{key}")
+        if field is not None and int(field.contents()) != expected:
+            raise ContractError(f"fastwam.{key} conflicts with PolicySpec")
+        geometry[key] = expected
     if any(value <= 0 for value in geometry.values()):
         raise ContractError("FastWAM geometry contains a zero dimension")
     if geometry["video_hidden_dim"] != \

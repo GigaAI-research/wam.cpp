@@ -1,6 +1,6 @@
 #include "models/gwp05/inputs.h"
 
-#include "models/common/input_validation.h"
+#include "policy/tensor_input.h"
 #include "models/gwp05/semantics.h"
 #include "policy/image_ops.h"
 #include "policy/language_ops.h"

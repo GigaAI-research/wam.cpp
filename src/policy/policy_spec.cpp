@@ -1,6 +1,6 @@
 #include "policy/policy_spec.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "wam/error.h"
 
 #include <algorithm>
@@ -68,6 +68,13 @@ TensorLayout parse_layout(const std::string & value,
     incompatible("unknown image tensor layout", field, value);
 }
 
+ResampleBoundaryMode parse_resample_boundary(const std::string & value,
+                                             const std::string & field) {
+    if (value == "truncate") return ResampleBoundaryMode::truncate;
+    if (value == "clamp") return ResampleBoundaryMode::clamp;
+    incompatible("unknown image resample boundary mode", field, value);
+}
+
 NormalizationKind parse_normalization(const std::string & value,
                                       const std::string & field) {
     if (value == "none") return NormalizationKind::none;
@@ -130,7 +137,7 @@ ActionRecoveryKind parse_recovery(const std::string & value,
     incompatible("unknown action recovery kind", field, value);
 }
 
-NormalizationStats read_stats(const GgufReader & reader,
+NormalizationStats read_stats(const artifact::ArtifactView & reader,
                               const std::string & domain,
                               std::size_t model_dim) {
     NormalizationStats stats;
@@ -347,7 +354,7 @@ bool rectangles_overlap(const ImagePlacement & first,
 } // namespace
 
 std::optional<PolicySpec> try_read_policy_spec(
-    const GgufReader & reader) {
+    const artifact::ArtifactView & reader) {
     if (!reader.has("wam.artifact_schema_version")) {
         if (reader.has("wam.policy.profile") ||
             reader.has("wam.input.image.roles") ||
@@ -361,8 +368,9 @@ std::optional<PolicySpec> try_read_policy_spec(
     PolicySpec spec;
     spec.identity.artifact_schema_version =
         reader.require_u32("wam.artifact_schema_version");
-    if (spec.identity.artifact_schema_version !=
-        kPolicySpecSchemaVersion) {
+    if (spec.identity.artifact_schema_version != kPolicySpecSchemaVersion &&
+        spec.identity.artifact_schema_version !=
+            kLegacyPolicySpecSchemaVersion) {
         incompatible("unsupported PolicySpec schema version",
                      "wam.artifact_schema_version",
                      std::to_string(spec.identity.artifact_schema_version));
@@ -441,6 +449,13 @@ std::optional<PolicySpec> try_read_policy_spec(
     spec.images.tensor_layout = parse_layout(
         reader.require_string("wam.input.image.tensor_layout"),
         "wam.input.image.tensor_layout");
+    if (spec.identity.artifact_schema_version >= 3) {
+        spec.images.resample_boundary = parse_resample_boundary(
+            reader.require_string("wam.input.image.resample_boundary"),
+            "wam.input.image.resample_boundary");
+    } else {
+        spec.images.resample_boundary = ResampleBoundaryMode::truncate;
+    }
 
     spec.state.real_dim = reader.require_u32("wam.input.state.real_dim");
     spec.state.model_dim = reader.require_u32("wam.input.state.model_dim");
@@ -539,8 +554,9 @@ std::optional<PolicySpec> try_read_policy_spec(
 }
 
 void validate_policy_spec(const PolicySpec & spec) {
-    if (spec.identity.artifact_schema_version !=
-        kPolicySpecSchemaVersion) {
+    if (spec.identity.artifact_schema_version != kPolicySpecSchemaVersion &&
+        spec.identity.artifact_schema_version !=
+            kLegacyPolicySpecSchemaVersion) {
         incompatible("PolicySpec schema version is invalid",
                      "wam.artifact_schema_version",
                      std::to_string(spec.identity.artifact_schema_version));

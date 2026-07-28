@@ -2,7 +2,7 @@
 #include "engine_internal.h"
 #include "pipeline.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "wam/error.h"
 
 #include "ggml.h"

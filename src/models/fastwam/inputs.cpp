@@ -1,7 +1,7 @@
 #include "models/fastwam/inputs.h"
 
 #include "policy/language_ops.h"
-#include "policy/observation_ops.h"
+#include "policy/observation_processor.h"
 #include "wam/error.h"
 
 #include <string>

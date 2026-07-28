@@ -15,9 +15,10 @@ from common.policy_spec import (
 
 
 ARCH = "gwp05"
-CONVERTER_REVISION = "wam-0.5-gwp05-policy-spec-v2"
+CONVERTER_REVISION = "wam-0.6-gwp05-policy-spec-v3"
 SUPPORTED_CONVERTER_REVISIONS = {
     "gwp05-native-bf16-v1",
+    "wam-0.5-gwp05-policy-spec-v2",
     CONVERTER_REVISION,
 }
 DTYPE_BYTES = {"F32": 4, "BF16": 2}
@@ -86,7 +87,7 @@ def load_policy_profile(path: Path, *, model_dim: int, action_horizon: int,
     if profile.get("format") != POLICY_PROFILE_FORMAT:
         raise ValueError(f"unsupported PolicySpec profile format: {profile.get('format')!r}")
     if profile.get("artifact_schema_version") != POLICY_SCHEMA_VERSION:
-        raise ValueError("PolicySpec profile schema version must be 2")
+        raise ValueError("PolicySpec profile schema version must be 3")
 
     for section in ("identity", "images", "state", "language", "action", "normalization"):
         if not isinstance(profile.get(section), dict):
@@ -106,6 +107,8 @@ def load_policy_profile(path: Path, *, model_dim: int, action_horizon: int,
         raise ValueError("PolicySpec image views must match roles exactly")
     if not isinstance(composition, dict) or composition.get("kind") != "canvas":
         raise ValueError("GWP05 PolicySpec requires canvas image composition")
+    if images.get("resample_boundary") not in ("truncate", "clamp"):
+        raise ValueError("PolicySpec image resample_boundary is invalid")
     if (composition.get("height"), composition.get("width")) != (
             image_height, image_width):
         raise ValueError("PolicySpec canvas dimensions differ from converter arguments")

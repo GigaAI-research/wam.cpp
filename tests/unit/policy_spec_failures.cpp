@@ -2,7 +2,7 @@
 #include "support/temp_file.h"
 #include "support/test_utils.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "policy/policy_spec.h"
 
 #include <stdexcept>
@@ -16,9 +16,10 @@ void expect_failure(wam::test::MetadataFixture fixture,
                     const std::string & expected_field) {
     wam::test::TempFile file(stem);
     fixture.write(file.string());
-    const auto reader = wam::internal::GgufReader::open(file.string());
+    const auto artifact =
+        wam::internal::artifact::ArtifactView::open(file.string());
     try {
-        (void) wam::internal::policy::try_read_policy_spec(*reader);
+        (void) wam::internal::policy::try_read_policy_spec(artifact);
     } catch (const wam::Error & error) {
         wam::test::require(
             error.code() == wam::ErrorCode::incompatible_artifact,

@@ -501,12 +501,17 @@ SessionConfig 包含：
 
 ### Phase 3：迁移 Artifact、PolicySpec 和 Policy Ops
 
-- 建立 ArtifactView、TensorSpec、schema v3 和可选 bundle manifest。
-- 将现有 GGUF reader 移入 `src/artifact`。
-- 将 image/state/language/action noise/action decode 重组到明确文件。
-- 删除 Architecture/Environment 分支和重复维度来源。
-- 实现 `wam-inspect`、`wam-validate`。
-- 更新 converter 和 profile schema，重新生成 0.6 GGUF fixture。
+状态：**已完成（2026-07-28）**。
+
+- 已将 GGUF reader 从 `src/models/common` 迁移到 `src/artifact`，并建立 `ArtifactView`、`TensorSpec` 和严格的 `wam-bundle-v1` manifest。`ArtifactView` 统一接受直接 GGUF 路径或 bundle 目录；manifest 只允许相对路径，拒绝父目录穿越、绝对路径、未知/重复字段和符号链接逃逸，并在打开模型前检查 model、tokenizer 和 external language encoder 资源是否存在。本阶段按既定范围不加入哈希字段或校验逻辑。
+- 已明确 Artifact 与模型 Contract 的边界：`src/artifact` 只理解 GGUF、通用 metadata/Tensor 查询、dtype/shape/required 约束和 bundle 资源；GWP05/FastWAM 的网络几何及 Tensor 命名仍由现有模型 Artifact 代码负责，并将在 Phase 5/6 分别改名和收敛为 `contract.*`。Phase 3 不提前移动模型数学或重写 Engine。
+- 已将公共 Policy 处理收口为 `observation_processor.*`、`tensor_input.*`、`image_ops.*`、`state_ops.*`、`language_ops.*`、`action_noise.*` 和 `action_decoder.*`。通用 Tensor 输入校验不再位于 `models/common`，action noise 与 action decode 不再混在一个文件中；Policy 和 Artifact 源码边界测试禁止依赖具体模型、环境或反向依赖。
+- 已发布 PolicySpec schema v3，将 `wam.input.image.resample_boundary` 变为显式字段。0.6 profile 和 converter 只写 v3；schema v2 仅作为迁移 oracle 只读，缺省为已冻结的 `truncate` 行为，不构成 0.6 legacy Artifact 兼容承诺。
+- 已将 PolicySpec 设为图像、state、language 和 action 公共几何的唯一来源。0.6 GWP05/FastWAM converter 不再重复写 image size、camera/view count、state/action dimension、action horizon 和 language context 等 Policy metadata；模型 hidden/layer/head、latent 和 scheduler 参数仍属于模型 Contract。legacy v2 中的重复字段只读取并与 PolicySpec 交叉校验，冲突时立即失败。
+- 已将四个正式 profile 升级为 `wam-policy-spec-profile-v2` / Artifact schema v3，并将 GWP05/FastWAM converter revision 升级为对应的 `wam-0.6-*-policy-spec-v3`。测试运行时生成的 0.6 GGUF fixture 已改为 schema v3 且不携带重复 policy 几何，因此无需向仓库提交二进制 fixture。
+- 已实现并安装 `wam-inspect` 与 `wam-validate`。`wam-inspect` 只打开 Artifact header、metadata、Tensor directory 和 bundle 资源，输出 architecture、PolicySpec、资源路径和大小信息；`wam-validate` 使用 `cpu_metadata` 执行已编译模型的 Artifact/Policy/Contract 校验，不创建设备 Backend 或上传大块权重。两者成功和失败均输出单行 JSON，错误包含稳定字符串 `code`、数值 `code_value`、message 和字段 details。
+- 已增加 Artifact/Policy 单元测试和 CLI 端到端测试，覆盖直接 GGUF、bundle、可选资源、缺失 manifest/resource、非法 JSON/schema、路径穿越、符号链接逃逸、未知字段、损坏 GGUF、Tensor dtype/shape、PolicySpec v2 只读、v3 必填字段和结构化错误。源码边界测试同时保证 Artifact 不依赖 Policy/具体模型、Policy 不依赖具体模型或 GGUF parser。
+- 验证结果：默认 CPU 35/35、关闭 GWP05/FastWAM/Serving 的 Runtime-only 24/24、CUDA 12.4 + cuDNN + `sm_80` 35/35；四个 schema v3 profile 均通过 converter profile validator，相关 Python 脚本通过语法编译。外部真实 Artifact/parity gate 未配置资产路径，仍按 Phase 5/6 的数值迁移阶段执行。
 
 验收：合法和损坏 GGUF、错误 metadata/dtype/shape、PolicySpec 冲突、bundle path/resource 缺失均产生稳定结构化错误；inspect/validate 不分配大块模型权重。
 

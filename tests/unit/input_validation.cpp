@@ -1,6 +1,6 @@
 #include "support/test_utils.h"
 
-#include "models/common/input_validation.h"
+#include "policy/tensor_input.h"
 
 #include <cstdint>
 #include <cstring>
@@ -21,18 +21,24 @@ int main() {
     tensor.dtype = wam::DType::f32;
     tensor.shape = {2};
     tensor.byte_order = wam::ByteOrder::little;
-    require(wam::internal::copy_f32_tensor(tensor, {{2}}, "value") ==
+    require(wam::internal::policy::copy_f32_tensor(tensor, {{2}}, "value") ==
                 source,
             "unaligned F32 tensor copy changed");
 
     tensor.shape = {1, 2};
     require_error(
-        [&] { (void) wam::internal::copy_f32_tensor(tensor, {{2}}, "value"); },
+        [&] {
+            (void) wam::internal::policy::copy_f32_tensor(
+                tensor, {{2}}, "value");
+        },
         wam::ErrorCode::invalid_argument, "unexpected tensor shape");
     tensor.shape = {2};
     tensor.byte_order = wam::ByteOrder::big;
     require_error(
-        [&] { (void) wam::internal::copy_f32_tensor(tensor, {{2}}, "value"); },
+        [&] {
+            (void) wam::internal::policy::copy_f32_tensor(
+                tensor, {{2}}, "value");
+        },
         wam::ErrorCode::invalid_argument, "wrong tensor byte order");
 
     std::vector<float> nonfinite = {
@@ -40,7 +46,10 @@ int main() {
     tensor.data = nonfinite.data();
     tensor.byte_order = wam::ByteOrder::little;
     require_error(
-        [&] { (void) wam::internal::copy_f32_tensor(tensor, {{2}}, "value"); },
+        [&] {
+            (void) wam::internal::policy::copy_f32_tensor(
+                tensor, {{2}}, "value");
+        },
         wam::ErrorCode::invalid_argument, "non-finite tensor payload");
     return 0;
 }

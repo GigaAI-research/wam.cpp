@@ -12,7 +12,11 @@ from common.policy_spec import POLICY_PROFILE_FORMAT, POLICY_SCHEMA_VERSION
 
 ARCH = "fastwam"
 CONVERSION_POLICY = "fastwam-bf16-policy-v2"
-CONVERTER_REVISION = "wam-0.5-fastwam-policy-spec-v2"
+CONVERTER_REVISION = "wam-0.6-fastwam-policy-spec-v3"
+SUPPORTED_CONVERTER_REVISIONS = {
+    "wam-0.5-fastwam-policy-spec-v2",
+    CONVERTER_REVISION,
+}
 EXPECTED_COMPONENT_COUNTS = {
     "video": 825,
     "action": 824,
@@ -30,7 +34,7 @@ def load_policy_profile(path: Path) -> dict[str, Any]:
     if profile.get("format") != POLICY_PROFILE_FORMAT:
         raise ValueError("unsupported PolicySpec profile format")
     if profile.get("artifact_schema_version") != POLICY_SCHEMA_VERSION:
-        raise ValueError("FastWAM PolicySpec schema version must be 2")
+        raise ValueError("FastWAM PolicySpec schema version must be 3")
     for section in ("identity", "images", "state", "language", "action", "normalization"):
         if not isinstance(profile.get(section), dict):
             raise ValueError(f"PolicySpec section {section!r} is required")
@@ -50,6 +54,8 @@ def load_policy_profile(path: Path) -> dict[str, Any]:
         raise ValueError("PolicySpec views must match image roles")
     if not isinstance(composition, dict) or composition.get("kind") != "canvas":
         raise ValueError("FastWAM requires canvas image composition")
+    if images.get("resample_boundary") not in ("truncate", "clamp"):
+        raise ValueError("FastWAM image resample_boundary is invalid")
     canvas_height = composition.get("height")
     canvas_width = composition.get("width")
     if not isinstance(canvas_height, int) or not isinstance(canvas_width, int) or canvas_height <= 0 or canvas_width <= 0:

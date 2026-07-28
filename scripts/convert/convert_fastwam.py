@@ -277,7 +277,6 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    composition = profile["images"]["composition"]
     args.out.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.out.with_name(f".{args.out.name}.incomplete.{os.getpid()}")
     writer = gguf.GGUFWriter(str(temporary), arch=ARCH)
@@ -286,15 +285,9 @@ def main() -> int:
     writer.add_string("fastwam.converter_revision", CONVERTER_REVISION)
     writer.add_string("fastwam.variant", "uncond_action_only")
     for key, value in (
-        ("image_height", composition["height"]),
-        ("image_width", composition["width"]),
-        ("num_cameras", len(profile["images"]["roles"])),
-        ("action_dim", action_dim), ("proprio_dim", proprio_dim),
-        ("action_horizon", profile["action"]["horizon"]),
         ("inference_steps", args.num_inference_steps),
         ("latent_channels", 48), ("spatial_downsample", 16),
         ("temporal_downsample", 4),
-        ("context_len", profile["language"]["max_tokens"]),
         ("text_dim", geometry["text_dim"]),
         ("video_hidden_dim", geometry["video_hidden_dim"]),
         ("action_hidden_dim", geometry["action_hidden_dim"]),

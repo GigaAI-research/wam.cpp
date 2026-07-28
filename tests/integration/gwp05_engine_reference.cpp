@@ -1,6 +1,6 @@
 #include "support/test_utils.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "models/gwp05/artifact.h"
 #include "models/gwp05/engine/engine.h"
 #include "models/gwp05/inputs.h"

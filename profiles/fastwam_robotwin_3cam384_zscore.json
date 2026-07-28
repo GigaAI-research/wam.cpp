@@ -1,6 +1,6 @@
 {
-  "format": "wam-policy-spec-profile-v1",
-  "artifact_schema_version": 2,
+  "format": "wam-policy-spec-profile-v2",
+  "artifact_schema_version": 3,
   "identity": {
     "profile": "fastwam_robotwin_3cam384_zscore",
     "checkpoint_revision": "fastwam_release/robotwin_uncond_3cam_384",
@@ -42,7 +42,8 @@
     },
     "color_space": "rgb",
     "pixel_range": "minus_one_to_one",
-    "tensor_layout": "chw"
+    "tensor_layout": "chw",
+    "resample_boundary": "truncate"
   },
   "state": {
     "real_dim": 14,

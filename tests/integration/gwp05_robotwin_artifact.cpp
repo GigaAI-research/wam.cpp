@@ -1,4 +1,4 @@
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "models/gwp05/artifact.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"
@@ -49,8 +49,10 @@ int main(int argc, char ** argv) {
     require(std::filesystem::is_regular_file(path),
             "formal RoboTwin GGUF does not exist");
 
+    const auto artifact_view =
+        wam::internal::artifact::ArtifactView::open(path.string());
     std::shared_ptr<wam::internal::GgufReader> reader =
-        wam::internal::GgufReader::open(path.string());
+        artifact_view.shared_gguf();
     require(reader->file_size() > UINT64_C(20) * 1024 * 1024 * 1024,
             "formal RoboTwin GGUF is truncated or synthetic");
     require(reader->require_string("general.architecture") == "gwp05" &&
@@ -80,7 +82,7 @@ int main(int argc, char ** argv) {
     }
 
     const std::optional<policy::PolicySpec> parsed =
-        policy::try_read_policy_spec(*reader);
+        policy::try_read_policy_spec(artifact_view);
     require(parsed.has_value(), "formal RoboTwin GGUF has no PolicySpec");
     const policy::PolicySpec & spec = *parsed;
     require(spec.identity.artifact_schema_version == 2 &&

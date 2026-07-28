@@ -1,4 +1,4 @@
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "models/gwp05/artifact.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"

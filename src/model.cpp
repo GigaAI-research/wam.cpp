@@ -1,9 +1,10 @@
 #include "wam/model.h"
 
 #include "arch.h"
+#include "artifact/artifact_view.h"
 #include "model_internal.h"
 #include "model_registry.h"
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "policy/policy_spec.h"
 #include "wam/error.h"
 #include "wam/session.h"
@@ -119,8 +120,9 @@ void validate_runtime_config(const RuntimeConfig & config) {
     }
 }
 
-internal::Arch detect_architecture(const internal::GgufReader & reader) {
-    const std::string value = reader.require_string("general.architecture");
+internal::Arch detect_architecture(
+    const internal::artifact::ArtifactView & artifact) {
+    const std::string value = artifact.require_string("general.architecture");
     const internal::Arch architecture = internal::arch_from_name(value);
     if (architecture == internal::Arch::unknown) {
         throw Error(ErrorCode::unsupported, "unsupported GGUF architecture",
@@ -147,11 +149,11 @@ Model Model::load(const std::string & artifact_path,
     }
     validate_runtime_config(config);
 
-    std::shared_ptr<internal::GgufReader> reader =
-        internal::GgufReader::open(artifact_path);
-    const internal::Arch architecture = detect_architecture(*reader);
+    internal::artifact::ArtifactView artifact =
+        internal::artifact::ArtifactView::open(artifact_path);
+    const internal::Arch architecture = detect_architecture(artifact);
     std::optional<PolicySpec> policy_spec =
-        internal::policy::try_read_policy_spec(*reader);
+        internal::policy::try_read_policy_spec(artifact);
 
     const internal::ModelFactory * factory =
         internal::model_registry().find(architecture);
@@ -164,8 +166,8 @@ Model Model::load(const std::string & artifact_path,
 
     ModelInfo info;
     info.architecture = std::string(internal::arch_name(architecture));
-    info.artifact_path = artifact_path;
-    info.artifact_bytes = reader->file_size();
+    info.artifact_path = artifact.path();
+    info.artifact_bytes = artifact.file_size();
     info.backend = config.backend;
     info.compute_precision = config.compute_precision;
     info.language_mode = config.language_mode;
@@ -173,7 +175,7 @@ Model Model::load(const std::string & artifact_path,
     std::unique_ptr<internal::ModelImpl> impl = translate_internal_errors(
         "model creation", [&] {
             return (*factory)(config, std::move(info), std::move(policy_spec),
-                              std::move(reader));
+                              artifact.shared_gguf());
         });
     return internal::adopt_model(std::move(impl));
 }

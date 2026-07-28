@@ -104,7 +104,9 @@ def _validate_policy_spec(reader: gguf.GGUFReader, expected: dict[str, Any]) -> 
     for field in ("kind", "height", "width"):
         if _field(reader, f"wam.input.image.composition.{field}") != composition[field]:
             raise ContractError(f"PolicySpec image composition {field} differs")
-    for field in ("color_space", "pixel_range", "tensor_layout"):
+    for field in (
+            "color_space", "pixel_range", "tensor_layout",
+            "resample_boundary"):
         if _field(reader, f"wam.input.image.{field}") != images[field]:
             raise ContractError(f"PolicySpec image {field} differs")
 
@@ -151,15 +153,38 @@ def validate_reader(reader: gguf.GGUFReader, expected_policy: str | None = None,
        _field(reader, "gwp05.architecture") != "gwp05":
         raise ContractError("artifact architecture is not gwp05")
 
-    keys = (
+    model_keys = (
         "hidden", "n_layers", "n_heads", "head_dim", "ffn_dim",
-        "action_hidden", "action_ffn_dim", "action_dim", "real_state_dim",
-        "real_action_dim", "num_embodiments", "embodiment_id", "image_height",
-        "image_width", "num_views", "action_chunk", "inference_steps",
+        "action_hidden", "action_ffn_dim", "num_embodiments",
+        "embodiment_id", "inference_steps",
         "t5_vocab_size", "t5_hidden", "t5_ffn_dim", "t5_heads", "t5_head_dim",
         "t5_layers", "vae_z_dim",
     )
-    geometry = {key: int(_field(reader, f"gwp05.{key}")) for key in keys}
+    geometry = {
+        key: int(_field(reader, f"gwp05.{key}")) for key in model_keys}
+    schema_artifact = reader.get_field("wam.artifact_schema_version") is not None
+    policy_geometry = {
+        "action_dim": int(_field(reader, "wam.output.action.model_dim")),
+        "real_state_dim": int(_field(reader, "wam.input.state.real_dim")),
+        "real_action_dim": int(_field(reader, "wam.output.action.real_dim")),
+        "image_height": int(_field(
+            reader, "wam.input.image.composition.height")),
+        "image_width": int(_field(
+            reader, "wam.input.image.composition.width")),
+        "num_views": len(_field(reader, "wam.input.image.roles")),
+        "action_chunk": int(_field(reader, "wam.output.action.horizon")),
+    } if schema_artifact else {}
+    for key in (
+            "action_dim", "real_state_dim", "real_action_dim",
+            "image_height", "image_width", "num_views", "action_chunk"):
+        field = reader.get_field(f"gwp05.{key}")
+        if schema_artifact:
+            geometry[key] = policy_geometry[key]
+            if field is not None and int(field.contents()) != geometry[key]:
+                raise ContractError(
+                    f"gwp05.{key} conflicts with PolicySpec")
+        else:
+            geometry[key] = int(_field(reader, f"gwp05.{key}"))
     flow_shift = float(_field(reader, "gwp05.flow_shift"))
     norm_eps = float(_field(reader, "gwp05.norm_eps"))
     if any(value <= 0 for key, value in geometry.items() if key != "embodiment_id"):
@@ -183,7 +208,6 @@ def validate_reader(reader: gguf.GGUFReader, expected_policy: str | None = None,
     if expected_policy is not None and policy_id != expected_policy:
         raise ContractError(f"policy {policy_id}, expected {expected_policy}")
     packed = bool(definition.get("pack_self_qkv"))
-    schema_artifact = reader.get_field("wam.artifact_schema_version") is not None
     if expected_profile is not None:
         if not schema_artifact:
             raise ContractError("artifact does not carry a PolicySpec schema")

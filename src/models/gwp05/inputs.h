@@ -2,7 +2,7 @@
 
 #include "models/gwp05/artifact.h"
 #include "models/common/model_types.h"
-#include "policy/observation_ops.h"
+#include "policy/observation_processor.h"
 #include "wam/observation.h"
 #include "wam/prediction.h"
 #include "wam/runtime_config.h"

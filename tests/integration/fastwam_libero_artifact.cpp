@@ -1,4 +1,4 @@
-#include "models/common/gguf_reader.h"
+#include "artifact/artifact_view.h"
 #include "models/fastwam/artifact.h"
 #include "models/fastwam/inputs.h"
 #include "policy/policy_spec.h"
@@ -16,9 +16,10 @@ using wam::test::require;
 
 int main(int argc, char ** argv) {
     require(argc == 2, "FastWAM artifact test requires one GGUF path");
-    auto reader = GgufReader::open(argv[1]);
+    auto artifact_view = wam::internal::artifact::ArtifactView::open(argv[1]);
+    auto reader = artifact_view.shared_gguf();
     const auto policy_spec =
-        wam::internal::policy::try_read_policy_spec(*reader);
+        wam::internal::policy::try_read_policy_spec(artifact_view);
     require(policy_spec.has_value(), "FastWAM PolicySpec is missing");
     const auto artifact = wam::internal::fastwam::load_artifact(
         reader, *policy_spec);

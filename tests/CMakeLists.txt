@@ -58,12 +58,32 @@ target_compile_options(wam_model_lifecycle PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
 add_test(NAME wam_model_lifecycle COMMAND wam_model_lifecycle)
 wam_add_test(wam_gguf_reader_unit unit/gguf_reader.cpp)
+wam_add_test(wam_artifact_layer_unit unit/artifact_layer.cpp)
 wam_add_test(wam_input_validation_unit unit/input_validation.cpp)
 wam_add_test(wam_policy_spec_unit unit/policy_spec.cpp)
 wam_add_test(wam_policy_spec_failures unit/policy_spec_failures.cpp)
 wam_add_test(wam_policy_ops_unit unit/policy_ops.cpp)
 if(WAM_BUILD_FASTWAM)
     wam_add_test(wam_model_load_metadata integration/model_load_metadata.cpp)
+endif()
+
+if(WAM_BUILD_APPS)
+    add_executable(wam_cli_fixture_writer tools/write_cli_fixture.cpp)
+    target_link_libraries(wam_cli_fixture_writer PRIVATE wam_test_fixtures)
+    target_include_directories(wam_cli_fixture_writer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(wam_cli_fixture_writer PRIVATE cxx_std_17)
+    target_compile_options(wam_cli_fixture_writer PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+    add_test(NAME wam_artifact_cli
+        COMMAND ${CMAKE_COMMAND}
+            -DWAM_FIXTURE_WRITER=$<TARGET_FILE:wam_cli_fixture_writer>
+            -DWAM_INSPECT=$<TARGET_FILE:wam-inspect>
+            -DWAM_VALIDATE=$<TARGET_FILE:wam-validate>
+            -DWAM_EXPECT_VALIDATE=${WAM_BUILD_GWP05}
+            -DWAM_CLI_TEST_ROOT=${PROJECT_BINARY_DIR}/tests/cli-artifact
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/artifact_cli.cmake)
+    set_tests_properties(wam_artifact_cli PROPERTIES LABELS "artifact;cli")
 endif()
 
 add_test(NAME wam_source_boundaries
@@ -324,6 +344,7 @@ endif()
 
 target_include_directories(wam_registry_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_gguf_reader_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(wam_artifact_layer_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_input_validation_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_policy_spec_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_policy_spec_failures PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -342,6 +363,7 @@ endif()
 
 foreach(target IN ITEMS
         wam_gguf_reader_unit
+        wam_artifact_layer_unit
         wam_policy_spec_unit
         wam_policy_spec_failures)
     target_link_libraries(${target} PRIVATE wam_test_fixtures)

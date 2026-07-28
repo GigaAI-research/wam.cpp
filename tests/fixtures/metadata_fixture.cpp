@@ -213,7 +213,7 @@ void MetadataFixture::write(const std::string & path) const {
 MetadataFixture valid_policy_fixture() {
     MetadataFixture fixture;
     fixture.set_string("general.architecture", "gwp05");
-    fixture.set_u32("wam.artifact_schema_version", 2);
+    fixture.set_u32("wam.artifact_schema_version", 3);
     fixture.set_string("wam.policy.profile", "synthetic_2cam_joint");
     fixture.set_string("wam.policy.embodiment", "synthetic_arm");
     fixture.set_string("wam.policy.training_dataset", "synthetic");
@@ -238,6 +238,7 @@ MetadataFixture valid_policy_fixture() {
     fixture.set_string("wam.input.image.color_space", "rgb");
     fixture.set_string("wam.input.image.pixel_range", "minus_one_to_one");
     fixture.set_string("wam.input.image.tensor_layout", "chw");
+    fixture.set_string("wam.input.image.resample_boundary", "truncate");
 
     fixture.set_u32("wam.input.state.real_dim", 3);
     fixture.set_u32("wam.input.state.model_dim", 4);
@@ -285,8 +286,15 @@ MetadataFixture valid_gwp05_policy_fixture() {
     MetadataFixture fixture;
     fixture.set_string("general.architecture", "gwp05");
     add_gwp05_geometry(fixture);
+    for (const char * key : {
+             "gwp05.action_dim", "gwp05.real_state_dim",
+             "gwp05.real_action_dim", "gwp05.image_height",
+             "gwp05.image_width", "gwp05.num_views",
+             "gwp05.action_chunk"}) {
+        fixture.remove(key);
+    }
 
-    fixture.set_u32("wam.artifact_schema_version", 2);
+    fixture.set_u32("wam.artifact_schema_version", 3);
     fixture.set_string("wam.policy.profile",
                        "gwp05_robotwin_dual_arm_fixture");
     fixture.set_string("wam.policy.embodiment", "dual_arm");
@@ -315,6 +323,7 @@ MetadataFixture valid_gwp05_policy_fixture() {
     fixture.set_string("wam.input.image.color_space", "rgb");
     fixture.set_string("wam.input.image.pixel_range", "minus_one_to_one");
     fixture.set_string("wam.input.image.tensor_layout", "chw");
+    fixture.set_string("wam.input.image.resample_boundary", "truncate");
 
     fixture.set_u32("wam.input.state.real_dim", 14);
     fixture.set_u32("wam.input.state.model_dim", 32);
@@ -363,10 +372,7 @@ MetadataFixture valid_gwp05_robotwin_14d_policy_fixture() {
     fixture.set_string("wam.policy.checkpoint_revision",
                        "checkpoint_epoch_9_step_100000");
 
-    fixture.set_u32("gwp05.action_dim", 14);
     fixture.set_u32("gwp05.num_embodiments", 1);
-    fixture.set_u32("gwp05.image_height", 384);
-    fixture.set_u32("gwp05.image_width", 320);
     fixture.set_u32("wam.input.state.model_dim", 14);
     fixture.set_u32("wam.output.action.model_dim", 14);
 

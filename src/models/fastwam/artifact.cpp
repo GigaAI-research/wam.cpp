@@ -1,11 +1,13 @@
 #include "models/fastwam/artifact.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
+#include "artifact/tensor_spec.h"
 #include "wam/error.h"
 
 #include "ggml.h"
 
 #include <array>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -13,8 +15,10 @@ namespace wam::internal::fastwam {
 namespace {
 
 constexpr const char * kConversionPolicy = "fastwam-bf16-policy-v2";
-constexpr const char * kConverterRevision =
+constexpr const char * kLegacyConverterRevision =
     "wam-0.5-fastwam-policy-spec-v2";
+constexpr const char * kConverterRevision =
+    "wam-0.6-fastwam-policy-spec-v3";
 
 [[noreturn]] void incompatible(const std::string & message,
                                const std::string & field,
@@ -32,11 +36,37 @@ std::uint32_t positive_u32(const GgufReader & reader,
     return value;
 }
 
-void require_bf16(const GgufReader & reader, const std::string & name) {
-    if (reader.require_tensor(name).dtype != DType::bf16) {
-        incompatible("FastWAM model tensor must be BF16", name,
-                     "expected BF16 storage");
+std::uint32_t policy_u32(std::size_t value, const std::string & field) {
+    if (value == 0 || value > std::numeric_limits<std::uint32_t>::max()) {
+        incompatible("FastWAM PolicySpec dimension is out of range", field,
+                     std::to_string(value));
     }
+    return static_cast<std::uint32_t>(value);
+}
+
+void cross_check_legacy_u32(const GgufReader & reader,
+                            const std::string & key,
+                            std::uint32_t expected,
+                            bool required) {
+    const std::string field = "fastwam." + key;
+    if (!reader.has(field)) {
+        if (required) {
+            incompatible("legacy FastWAM geometry is missing", field,
+                         "required by schema v2");
+        }
+        return;
+    }
+    const std::uint32_t actual = positive_u32(reader, key);
+    if (actual != expected) {
+        incompatible("legacy FastWAM geometry conflicts with PolicySpec",
+                     field, "expected " + std::to_string(expected) +
+                                ", got " + std::to_string(actual));
+    }
+}
+
+void require_bf16(const GgufReader & reader, const std::string & name) {
+    artifact::validate_tensor(
+        reader, {name, {DType::bf16}, std::nullopt, true});
 }
 
 std::vector<float> read_bf16(const GgufReader & reader,
@@ -174,24 +204,33 @@ std::shared_ptr<const ArtifactContract> load_artifact(
                      "fastwam.conversion_policy",
                      artifact->conversion_policy);
     }
-    if (artifact->reader->require_string("fastwam.converter_revision") !=
-        kConverterRevision) {
+    const std::string converter_revision =
+        artifact->reader->require_string("fastwam.converter_revision");
+    if (converter_revision != kConverterRevision &&
+        converter_revision != kLegacyConverterRevision) {
         incompatible("unsupported FastWAM converter revision",
                      "fastwam.converter_revision", "mismatch");
     }
+    const bool legacy_geometry =
+        converter_revision == kLegacyConverterRevision;
 
     Geometry & geometry = artifact->geometry;
-    geometry.image_height = positive_u32(*artifact->reader, "image_height");
-    geometry.image_width = positive_u32(*artifact->reader, "image_width");
-    geometry.num_cameras = positive_u32(*artifact->reader, "num_cameras");
-    geometry.action_dim = positive_u32(*artifact->reader, "action_dim");
-    geometry.proprio_dim = positive_u32(*artifact->reader, "proprio_dim");
-    geometry.action_horizon = positive_u32(*artifact->reader, "action_horizon");
+    geometry.image_height = policy_spec.images.composition.height;
+    geometry.image_width = policy_spec.images.composition.width;
+    geometry.num_cameras = policy_u32(policy_spec.images.views.size(),
+                                      "wam.input.image.roles");
+    geometry.action_dim = policy_u32(policy_spec.action.model_dim,
+                                     "wam.output.action.model_dim");
+    geometry.proprio_dim = policy_u32(policy_spec.state.model_dim,
+                                      "wam.input.state.model_dim");
+    geometry.action_horizon = policy_u32(policy_spec.action.horizon,
+                                         "wam.output.action.horizon");
     geometry.inference_steps = positive_u32(*artifact->reader, "inference_steps");
     geometry.latent_channels = positive_u32(*artifact->reader, "latent_channels");
     geometry.spatial_downsample = positive_u32(*artifact->reader, "spatial_downsample");
     geometry.temporal_downsample = positive_u32(*artifact->reader, "temporal_downsample");
-    geometry.context_len = positive_u32(*artifact->reader, "context_len");
+    geometry.context_len = policy_u32(policy_spec.language.max_tokens,
+                                      "wam.input.language.max_tokens");
     geometry.text_dim = positive_u32(*artifact->reader, "text_dim");
     geometry.video_hidden_dim = positive_u32(*artifact->reader, "video_hidden_dim");
     geometry.action_hidden_dim = positive_u32(*artifact->reader, "action_hidden_dim");
@@ -202,6 +241,19 @@ std::shared_ptr<const ArtifactContract> load_artifact(
     geometry.video_shift = artifact->reader->require_f32("fastwam.video_shift");
     geometry.norm_eps = artifact->reader->require_f32("fastwam.norm_eps");
     geometry.variant = artifact->reader->require_string("fastwam.variant");
+
+    for (const auto & item :
+         std::array<std::pair<const char *, std::uint32_t>, 7>{
+             {{"image_height", geometry.image_height},
+              {"image_width", geometry.image_width},
+              {"num_cameras", geometry.num_cameras},
+              {"action_dim", geometry.action_dim},
+              {"proprio_dim", geometry.proprio_dim},
+              {"action_horizon", geometry.action_horizon},
+              {"context_len", geometry.context_len}}}) {
+        cross_check_legacy_u32(*artifact->reader, item.first, item.second,
+                               legacy_geometry);
+    }
 
     if (geometry.variant != "uncond_action_only") {
         incompatible("FastWAM variant is outside the 0.5 public scope",

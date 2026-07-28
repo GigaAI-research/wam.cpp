@@ -1,7 +1,7 @@
 #pragma once
 
 #include "models/gwp05/engine/engine.h"
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 #include "models/common/scheduler.h"
 #include "ggml.h"
 #include "ggml-alloc.h"

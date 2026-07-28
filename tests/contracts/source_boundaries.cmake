@@ -26,6 +26,18 @@ wam_assert_no_match(
     "policy code depends on a concrete model"
     "#[ \t]*include[ \t]*[<\"]models/(gwp05|fastwam)/"
     ${policy_sources})
+wam_assert_no_match(
+    "policy code depends on the GGUF parser instead of ArtifactView"
+    "#[ \t]*include[ \t]*[<\"]artifact/gguf_reader\\.h"
+    ${policy_sources})
+
+file(GLOB_RECURSE artifact_sources
+    "${WAM_SOURCE_DIR}/src/artifact/*.h"
+    "${WAM_SOURCE_DIR}/src/artifact/*.cpp")
+wam_assert_no_match(
+    "artifact code depends on a concrete model or policy"
+    "#[ \t]*include[ \t]*[<\"](models/(gwp05|fastwam)/|policy/)"
+    ${artifact_sources})
 
 file(GLOB_RECURSE gwp05_sources
     "${WAM_SOURCE_DIR}/src/models/gwp05/*.h"

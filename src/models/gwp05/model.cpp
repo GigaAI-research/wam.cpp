@@ -7,7 +7,7 @@
 #include "models/gwp05/inputs.h"
 #include "models/gwp05/semantics.h"
 #include "wam/error.h"
-#include "policy/action_ops.h"
+#include "policy/action_decoder.h"
 
 #include <algorithm>
 #include <chrono>
@@ -69,7 +69,7 @@ Prediction make_prediction(const CoreAction & core,
                            const policy::PolicySpec & spec) {
     const policy::ActionSpec & action = spec.action;
     policy::validate_core_action(core.values, action);
-    const policy::PolicyActionChunk action_chunk =
+    const policy::DecodedActionChunk action_chunk =
         policy::decode_action_reference(
             core.values, prepared.observation.raw_state, action, action.stats);
     Prediction prediction;

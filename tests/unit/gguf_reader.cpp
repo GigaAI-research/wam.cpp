@@ -2,7 +2,7 @@
 #include "support/temp_file.h"
 #include "support/test_utils.h"
 
-#include "models/common/gguf_reader.h"
+#include "artifact/gguf_reader.h"
 
 #include <cstdint>
 #include <filesystem>
