@@ -1,0 +1,28 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(ggml CONFIG)
+
+# The pinned GGML package omits private CUDA dependencies when its libraries
+# are static but GGML_STATIC (the process-wide static-link option) is disabled.
+if(GGML_CUDA AND TARGET ggml::ggml-cuda)
+    find_dependency(CUDAToolkit)
+    set_property(TARGET ggml::ggml-cuda APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES
+            CUDA::cudart
+            CUDA::cublas)
+    if(NOT GGML_CUDA_NO_VMM)
+        set_property(TARGET ggml::ggml-cuda APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES CUDA::cuda_driver)
+    endif()
+    if(GGML_CUDA_CUDNN)
+        find_library(wam_cudnn_library NAMES cudnn REQUIRED)
+        set_property(TARGET ggml::ggml-cuda APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES "${wam_cudnn_library}")
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/wamTargets.cmake")
+set_property(TARGET wam::core APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES ggml::ggml)
+check_required_components(wam)

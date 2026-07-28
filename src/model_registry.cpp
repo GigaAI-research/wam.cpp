@@ -1,8 +1,5 @@
 #include "model_registry.h"
 
-#include "models/fastwam/model.h"
-#include "models/gwp05/model.h"
-
 #include <utility>
 
 namespace wam::internal {
@@ -41,16 +38,6 @@ ModelRegistry & model_registry() {
         return value;
     }();
     return registry;
-}
-
-void register_builtin_models(ModelRegistry & registry) {
-    (void) registry;
-#if WAM_BUILD_GWP05
-    register_gwp05(registry);
-#endif
-#if WAM_BUILD_FASTWAM
-    register_fastwam(registry);
-#endif
 }
 
 } // namespace wam::internal

@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(wam VERSION 0.5.0 LANGUAGES C CXX)
+project(wam VERSION 0.6.0 LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(CMakePackageConfigHelpers)
 include(Dependencies)
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,28 +59,66 @@ endif()
 
 wam_configure_gguf_dependency()
 
-add_library(wam_core STATIC
-    src/types.cpp
-    src/arch.cpp
-    src/model.cpp
-    src/model_internal.cpp
-    src/model_registry.cpp
-    src/models/common/gguf_reader.cpp
+# Internal OBJECT targets expose ownership and dependency boundaries without
+# changing the single-library deployment model during the 0.6 migration.
+function(wam_configure_internal_target target)
+    target_include_directories(${target} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(${target} PRIVATE cxx_std_17)
+    target_compile_definitions(${target} PRIVATE
+        WAM_BUILD_GWP05=$<BOOL:${WAM_BUILD_GWP05}>
+        WAM_BUILD_FASTWAM=$<BOOL:${WAM_BUILD_FASTWAM}>
+        WAM_HAS_CUDA=$<BOOL:${WAM_CUDA}>)
+    target_compile_options(${target} PRIVATE
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-Wall;-Wextra;-Wpedantic;-Werror>)
+endfunction()
+
+add_library(wam_backend_ggml INTERFACE)
+add_library(wam::backend_ggml ALIAS wam_backend_ggml)
+set_target_properties(wam_backend_ggml PROPERTIES EXPORT_NAME backend_ggml)
+target_link_libraries(wam_backend_ggml INTERFACE
+    $<BUILD_INTERFACE:ggml>
+    $<BUILD_INTERFACE:ggml-cpu>
+    $<INSTALL_INTERFACE:ggml::ggml>)
+if(WAM_CUDA)
+    target_link_libraries(wam_backend_ggml INTERFACE
+        $<BUILD_INTERFACE:ggml-cuda>)
+endif()
+
+add_library(wam_artifact OBJECT
+    src/models/common/gguf_reader.cpp)
+add_library(wam::artifact ALIAS wam_artifact)
+wam_configure_internal_target(wam_artifact)
+target_link_libraries(wam_artifact PRIVATE wam::backend_ggml)
+
+add_library(wam_policy OBJECT
     src/models/common/input_validation.cpp
-    src/models/common/scheduler.cpp
     src/policy/action_ops.cpp
     src/policy/image_ops.cpp
     src/policy/language_ops.cpp
     src/policy/observation_ops.cpp
     src/policy/policy_spec.cpp
-    src/policy/state_ops.cpp
-)
+    src/policy/state_ops.cpp)
+add_library(wam::policy ALIAS wam_policy)
+wam_configure_internal_target(wam_policy)
+target_link_libraries(wam_policy PRIVATE
+    wam_artifact
+    wam::backend_ggml)
 
-add_library(wam::core ALIAS wam_core)
-set_target_properties(wam_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(wam_runtime_base OBJECT
+    src/types.cpp
+    src/arch.cpp
+    src/model_internal.cpp
+    src/model_registry.cpp)
+add_library(wam::runtime_base ALIAS wam_runtime_base)
+wam_configure_internal_target(wam_runtime_base)
+target_link_libraries(wam_runtime_base PRIVATE wam_policy)
 
+set(wam_model_objects "")
 if(WAM_BUILD_GWP05)
-    target_sources(wam_core PRIVATE
+    add_library(wam_model_gwp05 OBJECT
+        src/models/common/scheduler.cpp
         src/models/gwp05/artifact.cpp
         src/models/gwp05/engine/action.cpp
         src/models/gwp05/engine/backbone.cpp
@@ -91,18 +131,25 @@ if(WAM_BUILD_GWP05)
         src/models/gwp05/inputs.cpp
         src/models/gwp05/model.cpp
         src/models/gwp05/semantics.cpp)
+    add_library(wam::model_gwp05 ALIAS wam_model_gwp05)
+    wam_configure_internal_target(wam_model_gwp05)
+    target_link_libraries(wam_model_gwp05 PRIVATE
+        wam_runtime_base
+        wam_artifact
+        wam_policy
+        wam::backend_ggml)
     if(WAM_CUDA)
-        target_link_libraries(wam_core PRIVATE CUDA::cudart)
-        target_compile_definitions(wam_core PRIVATE
-            GGML_USE_CUDA=1)
+        target_link_libraries(wam_model_gwp05 PRIVATE CUDA::cudart)
+        target_compile_definitions(wam_model_gwp05 PRIVATE GGML_USE_CUDA=1)
     endif()
     if(WAM_CUDNN)
-        target_compile_definitions(wam_core PRIVATE WAM_GWP05_CUDNN=1)
+        target_compile_definitions(wam_model_gwp05 PRIVATE WAM_GWP05_CUDNN=1)
     endif()
+    list(APPEND wam_model_objects $<TARGET_OBJECTS:wam_model_gwp05>)
 endif()
 
 if(WAM_BUILD_FASTWAM)
-    target_sources(wam_core PRIVATE
+    add_library(wam_model_fastwam OBJECT
         src/models/fastwam/artifact.cpp
         src/models/fastwam/engine/action_dit.cpp
         src/models/fastwam/engine/debug.cpp
@@ -115,26 +162,44 @@ if(WAM_BUILD_FASTWAM)
         src/models/fastwam/inputs.cpp
         src/models/fastwam/model.cpp
         src/models/fastwam/semantics.cpp)
+    add_library(wam::model_fastwam ALIAS wam_model_fastwam)
+    wam_configure_internal_target(wam_model_fastwam)
+    target_link_libraries(wam_model_fastwam PRIVATE
+        wam_runtime_base
+        wam_artifact
+        wam_policy
+        wam::backend_ggml)
+    list(APPEND wam_model_objects $<TARGET_OBJECTS:wam_model_fastwam>)
 endif()
 
-target_include_directories(wam_core
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-target_compile_definitions(wam_core PRIVATE
-    WAM_BUILD_GWP05=$<BOOL:${WAM_BUILD_GWP05}>
-    WAM_BUILD_FASTWAM=$<BOOL:${WAM_BUILD_FASTWAM}>
-    WAM_HAS_CUDA=$<BOOL:${WAM_CUDA}>)
-
-target_link_libraries(wam_core PRIVATE ggml ggml-cpu)
-if(WAM_CUDA)
-    target_link_libraries(wam_core PRIVATE ggml-cuda)
+add_library(wam_core_archive STATIC
+    src/model.cpp
+    src/models/builtin_modules.cpp
+    $<TARGET_OBJECTS:wam_artifact>
+    $<TARGET_OBJECTS:wam_policy>
+    $<TARGET_OBJECTS:wam_runtime_base>
+    ${wam_model_objects})
+wam_configure_internal_target(wam_core_archive)
+if(WAM_CUDA AND WAM_BUILD_GWP05)
+    target_link_libraries(wam_core_archive PRIVATE CUDA::cudart)
 endif()
+set_target_properties(wam_core_archive PROPERTIES
+    EXPORT_NAME core_archive
+    OUTPUT_NAME wam
+    VERSION ${PROJECT_VERSION})
 
-target_compile_options(wam_core PRIVATE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-Wall;-Wextra;-Wpedantic;-Werror>)
+add_library(wam_core INTERFACE)
+target_include_directories(wam_core INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(wam_core INTERFACE wam_core_archive)
+set_target_properties(wam_core PROPERTIES EXPORT_NAME core)
+
+add_library(wam_core_build INTERFACE)
+add_library(wam::core ALIAS wam_core_build)
+target_link_libraries(wam_core_build INTERFACE
+    wam_core
+    wam_backend_ggml)
 
 if(WAM_BUILD_SERVING)
     add_library(wam_c_api SHARED
@@ -143,12 +208,18 @@ if(WAM_BUILD_SERVING)
     add_library(wam::c_api ALIAS wam_c_api)
     target_link_libraries(wam_c_api PRIVATE wam::core)
     target_include_directories(wam_c_api
-        PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(wam_c_api PRIVATE WAM_C_API_BUILD=1)
     target_compile_options(wam_c_api PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
-    set_target_properties(wam_c_api PROPERTIES OUTPUT_NAME wam_c_api)
+    set_target_properties(wam_c_api PROPERTIES
+        EXPORT_NAME c_api
+        OUTPUT_NAME wam_c_api
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR})
 
     find_program(WAM_PROTOC_EXECUTABLE protoc)
     if(WAM_PROTOC_EXECUTABLE)
@@ -168,6 +239,36 @@ if(WAM_BUILD_SERVING)
         message(WARNING "protoc was not found; wam.desc will not be generated")
     endif()
 endif()
+
+set(wam_install_targets wam_core wam_core_archive)
+if(WAM_BUILD_SERVING)
+    list(APPEND wam_install_targets wam_c_api)
+endif()
+install(TARGETS ${wam_install_targets}
+    EXPORT wamTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY include/wam
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h")
+install(EXPORT wamTargets
+    FILE wamTargets.cmake
+    NAMESPACE wam::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/wam)
+
+configure_package_config_file(
+    cmake/wamConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/wamConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/wam)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/wamConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/wamConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/wamConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/wam)
 
 if(WAM_BUILD_TESTS)
     enable_testing()

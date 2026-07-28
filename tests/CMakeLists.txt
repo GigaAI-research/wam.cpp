@@ -8,6 +8,23 @@ function(wam_add_test target source)
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
 
+foreach(target IN ITEMS
+        wam_artifact
+        wam_policy
+        wam_backend_ggml
+        wam_runtime_base
+        wam_core)
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "required Phase 1 target is missing: ${target}")
+    endif()
+endforeach()
+if(WAM_BUILD_GWP05 AND NOT TARGET wam_model_gwp05)
+    message(FATAL_ERROR "enabled GWP05 target is missing")
+endif()
+if(WAM_BUILD_FASTWAM AND NOT TARGET wam_model_fastwam)
+    message(FATAL_ERROR "enabled FastWAM target is missing")
+endif()
+
 add_library(wam_test_fixtures STATIC fixtures/metadata_fixture.cpp)
 target_link_libraries(wam_test_fixtures PRIVATE ggml)
 target_include_directories(wam_test_fixtures PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -16,6 +33,10 @@ target_compile_options(wam_test_fixtures PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
 
 wam_add_test(wam_public_api_contract contracts/public_api_compile.cpp)
+wam_add_test(wam_header_wam_contract contracts/header_wam.cpp)
+wam_add_test(wam_header_types_contract contracts/header_types.cpp)
+wam_add_test(wam_header_version_contract contracts/header_version.cpp)
+wam_add_test(wam_header_c_api_contract contracts/header_c_api.cpp)
 wam_add_test(wam_types_unit unit/types.cpp)
 wam_add_test(wam_registry_unit unit/model_registry.cpp)
 wam_add_test(wam_model_lifecycle integration/model_lifecycle.cpp)
@@ -24,7 +45,26 @@ wam_add_test(wam_input_validation_unit unit/input_validation.cpp)
 wam_add_test(wam_policy_spec_unit unit/policy_spec.cpp)
 wam_add_test(wam_policy_spec_failures unit/policy_spec_failures.cpp)
 wam_add_test(wam_policy_ops_unit unit/policy_ops.cpp)
-wam_add_test(wam_model_load_metadata integration/model_load_metadata.cpp)
+if(WAM_BUILD_FASTWAM)
+    wam_add_test(wam_model_load_metadata integration/model_load_metadata.cpp)
+endif()
+
+add_test(NAME wam_source_boundaries
+    COMMAND ${CMAKE_COMMAND}
+        -DWAM_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/contracts/source_boundaries.cmake)
+set_tests_properties(wam_source_boundaries PROPERTIES LABELS "contract;boundary")
+
+add_test(NAME wam_install_consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DWAM_BINARY_DIR=${PROJECT_BINARY_DIR}
+        -DWAM_CONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/consumer
+        -DWAM_TEST_CONFIG=$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/contracts/install_consumer.cmake)
+set_tests_properties(wam_install_consumer PROPERTIES
+    LABELS "contract;install"
+    RUN_SERIAL TRUE
+    TIMEOUT 180)
 
 if(WAM_BUILD_GWP05)
     wam_add_test(wam_gwp05_artifact integration/gwp05_artifact.cpp)
@@ -287,10 +327,12 @@ endif()
 foreach(target IN ITEMS
         wam_gguf_reader_unit
         wam_policy_spec_unit
-        wam_policy_spec_failures
-        wam_model_load_metadata)
+        wam_policy_spec_failures)
     target_link_libraries(${target} PRIVATE wam_test_fixtures)
 endforeach()
+if(WAM_BUILD_FASTWAM)
+    target_link_libraries(wam_model_load_metadata PRIVATE wam_test_fixtures)
+endif()
 
 if(WAM_BUILD_GWP05)
     foreach(target IN ITEMS

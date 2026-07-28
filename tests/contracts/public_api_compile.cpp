@@ -4,7 +4,7 @@
 #include <type_traits>
 
 static_assert(WAM_VERSION_MAJOR == 0, "unexpected major version");
-static_assert(WAM_VERSION_MINOR == 5, "unexpected minor version");
+static_assert(WAM_VERSION_MINOR == 6, "unexpected minor version");
 static_assert(std::is_destructible<wam::ModelOptions>::value,
               "public ModelOptions must be a complete type");
 static_assert(std::is_destructible<wam::Prediction>::value,
