@@ -2,6 +2,8 @@
 
 #include "ops.h"
 
+#include "wam/error.h"
+
 #include "ggml-alloc.h"
 
 #include <array>

@@ -85,7 +85,7 @@ int main() {
         wam::test::valid_gwp05_policy_fixture();
     fixture.write(file.string());
     const auto reader = wam::internal::GgufReader::open(file.string());
-    auto spec = *wam::internal::policy::try_read_policy_spec_draft(*reader);
+    auto spec = *wam::internal::policy::try_read_policy_spec(*reader);
     semantics::validate_policy_semantics(spec);
 
     spec.images.composition.width = 64;

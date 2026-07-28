@@ -18,7 +18,7 @@ int main(int argc, char ** argv) {
     require(argc == 2, "FastWAM RoboTwin artifact test requires one GGUF path");
     auto reader = GgufReader::open(argv[1]);
     const auto policy_spec =
-        wam::internal::policy::try_read_policy_spec_draft(*reader);
+        wam::internal::policy::try_read_policy_spec(*reader);
     require(policy_spec.has_value(), "FastWAM RoboTwin PolicySpec is missing");
     const auto artifact = wam::internal::fastwam::load_artifact(
         reader, *policy_spec);
@@ -64,7 +64,7 @@ int main(int argc, char ** argv) {
             values.data(), values.size() * sizeof(float), wam::DType::f32,
             std::move(shape), layout, wam::ByteOrder::little};
     };
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {image("camera_right_wrist"), image("camera_high"),
                      image("camera_left_wrist")};
     inputs.state = f32(state, {14}, "D");
@@ -83,17 +83,16 @@ int main(int argc, char ** argv) {
                 prepared.observation.action_noise == noise,
             "FastWAM RoboTwin policy input boundary changed");
 
-    wam::ModelOptions options;
-    options.artifact_path = argv[1];
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cpu_metadata;
-    wam::Model * model = wam::model_load(options);
-    const wam::ModelInfo & info = wam::model_info(model);
+    wam::Model model = wam::Model::load(argv[1], options);
+    const wam::ModelInfo & info = model.info();
     require(info.architecture == "fastwam" &&
-                info.artifact_policy ==
+                info.policy_spec != nullptr &&
+                info.policy_spec->identity.profile ==
                     "fastwam_robotwin_3cam384_zscore" &&
                 info.language_mode ==
                     wam::LanguageRuntimeMode::external_embedding,
             "FastWAM RoboTwin public metadata lifecycle changed");
-    wam::model_free(model);
     return 0;
 }

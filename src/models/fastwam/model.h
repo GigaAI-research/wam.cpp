@@ -13,9 +13,9 @@ class ModelRegistry;
 namespace fastwam {
 
 std::unique_ptr<ModelImpl> create_model(
-    const ModelOptions & options,
+    const RuntimeConfig & options,
     ModelInfo info,
-    std::optional<policy::PolicySpecDraft> policy_spec,
+    std::optional<policy::PolicySpec> policy_spec,
     std::shared_ptr<GgufReader> reader);
 
 } // namespace fastwam

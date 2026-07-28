@@ -1,5 +1,7 @@
 #include "models/common/gguf_reader.h"
 
+#include "wam/error.h"
+
 #include "ggml.h"
 #include "gguf.h"
 

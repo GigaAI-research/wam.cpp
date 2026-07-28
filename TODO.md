@@ -480,6 +480,17 @@ SessionConfig 包含：
 
 ### Phase 2：重建公共 C++ API
 
+状态：**已完成（2026-07-28）**。
+
+- 已实现 move-only RAII `Model`、`Session` 和 `Pipeline`；`Session` 通过共享模型实现持有资源，公开 `Model` 对象先析构后已有 Session 仍可继续预测。
+- 已将公共接口拆分为 `model.h`、`session.h`、`pipeline.h`、`observation.h`、`prediction.h`、`policy_spec.h`、`runtime_config.h` 和 `error.h`，并删除原公共 `types.h` 与实现文件。
+- 已将 `PolicySpecDraft` 收敛为公共 `PolicySpec`；`ModelInfo` 通过 `shared_ptr<const PolicySpec>` 暴露模型使用的只读契约，同时公开 `Capabilities`、`Telemetry` 和拥有输出内存的 `PolicyActionChunk`。
+- 已统一 C++ 失败语义：`predict()` 返回拥有数据的 `Prediction`，`reset()` 成功返回 `void`，失败抛出 `wam::Error`；公共边界保留已有 `wam::Error`，并将其他异常转换为 `ErrorCode::internal`。
+- 已将现有 GWP05、FastWAM 和 C ABI v3 实现迁移到新 C++ 生命周期接口；C ABI v4 与 RPC 破坏式升级仍按计划留在 Phase 7，不在本阶段扩大范围。
+- 已增加每个公共头文件的独立编译测试、安装后 external consumer 测试，以及使用者视角的 fake-model 生命周期测试。测试主体只依赖公共 `wam/*` 头文件，覆盖 move-only、moved-from 错误、Model/Session 生命周期、predict/reset、结构化错误保留和非 `wam::Error` 转换。
+- 本阶段只调整类型、所有权、调用方式和字段命名；GWP05/FastWAM 数学、计算图、权重加载顺序和目录结构未改变。
+- 验证结果：默认 CPU 33/33、关闭 GWP05/FastWAM/Serving 的 Runtime-only 22/22、CUDA 12.4 + cuDNN + `sm_80` 33/33；源码边界和安装消费测试均通过。
+
 - 实现 RAII Model、Session、Pipeline。
 - 拆分 Observation、Prediction、PolicySpec、RuntimeConfig 和 Error 公共头文件。
 - 将内部 PolicySpecDraft 收敛为公开不可变 PolicySpec。

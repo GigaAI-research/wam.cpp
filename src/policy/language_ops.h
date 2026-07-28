@@ -1,6 +1,8 @@
 #pragma once
 
 #include "policy/policy_spec.h"
+#include "wam/observation.h"
+#include "wam/prediction.h"
 
 #include <cstddef>
 #include <cstdint>

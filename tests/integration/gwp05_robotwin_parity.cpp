@@ -180,7 +180,7 @@ int main(int argc, char ** argv) {
     (void) read_array<float>(
         reference_root / "vae_latent.f32", 48U * 24U * 20U);
 
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {
         image_view("camera_high", high),
         image_view("camera_left_wrist", left),
@@ -193,14 +193,14 @@ int main(int argc, char ** argv) {
         {attention_mask.data(), attention_mask.size() * sizeof(std::int32_t),
          wam::DType::i32, {64}, "T", wam::ByteOrder::little}};
 
-    policy::PolicySpecDraft spec;
+    policy::PolicySpec spec;
     ErrorMetrics image_metrics;
     ErrorMetrics state_metrics;
     {
         std::shared_ptr<wam::internal::GgufReader> reader =
             wam::internal::GgufReader::open(model_path.string());
-        const std::optional<policy::PolicySpecDraft> parsed =
-            policy::try_read_policy_spec_draft(*reader);
+        const std::optional<policy::PolicySpec> parsed =
+            policy::try_read_policy_spec(*reader);
         require(parsed.has_value(), "formal GGUF has no PolicySpec");
         spec = *parsed;
         const std::shared_ptr<const gwp05::ArtifactContract> artifact =
@@ -228,18 +228,17 @@ int main(int argc, char ** argv) {
                 "explicit action noise changed during preprocessing");
     }
 
-    wam::ModelOptions options;
-    options.artifact_path = model_path.string();
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cuda;
     options.compute_precision = wam::ComputePrecision::bf16;
     options.language_mode = wam::LanguageRuntimeMode::external_embedding;
     options.prompt_cache_capacity = 0;
-    std::unique_ptr<wam::Model, decltype(&wam::model_free)> model(
-        wam::model_load(options), &wam::model_free);
-    const wam::ModelInfo & info = wam::model_info(model.get());
+    wam::Model model = wam::Model::load(model_path.string(), options);
+    const wam::ModelInfo & info = model.info();
     require(info.backend == wam::Backend::cuda &&
                 info.compute_precision == wam::ComputePrecision::bf16 &&
-                info.artifact_policy ==
+                info.policy_spec != nullptr &&
+                info.policy_spec->identity.profile ==
                     "gwp05_robotwin_dual_arm_14d_zscore" &&
                 info.capabilities.action &&
                 info.capabilities.raw_images &&
@@ -248,18 +247,17 @@ int main(int argc, char ** argv) {
                 info.resident_device_bytes > 0,
             "public model did not select the Gate A BF16/CUDA runtime");
 
-    wam::SessionOptions session_options;
+    wam::SessionConfig session_options;
     session_options.enable_prefix_cache = true;
     session_options.random_seed = 20260725;
-    std::unique_ptr<wam::Session, decltype(&wam::session_free)> session(
-        wam::session_create(model.get(), session_options), &wam::session_free);
-    const wam::Prediction prediction = wam::predict(session.get(), inputs);
+    wam::Session session = model.create_session(session_options);
+    const wam::Prediction prediction = session.predict(inputs);
     const std::vector<float> action = prediction_values(prediction);
-    require(prediction.stats.model_milliseconds > 0.0 &&
-                prediction.stats.model_vision_milliseconds > 0.0 &&
-                prediction.stats.model_decode_milliseconds > 0.0 &&
-                prediction.stats.total_milliseconds >=
-                    prediction.stats.model_milliseconds,
+    require(prediction.telemetry.model_milliseconds > 0.0 &&
+                prediction.telemetry.model_vision_milliseconds > 0.0 &&
+                prediction.telemetry.model_decode_milliseconds > 0.0 &&
+                prediction.telemetry.total_milliseconds >=
+                    prediction.telemetry.model_milliseconds,
             "public BF16 runtime timing phases are incomplete");
 
     std::vector<float> recovered_normalized(action.size());
@@ -286,10 +284,9 @@ int main(int argc, char ** argv) {
         action_metrics.mean_absolute <= 1.0e-3 &&
         action_metrics.maximum_absolute <= 1.0e-2;
 
-    require(static_cast<bool>(wam::session_reset(session.get())),
-            "public session reset failed");
+    session.reset();
     const std::vector<float> repeated = prediction_values(
-        wam::predict(session.get(), inputs));
+        session.predict(inputs));
     require(repeated == action,
             "explicit-noise prediction changed after session reset");
     require(noise == read_array<float>(

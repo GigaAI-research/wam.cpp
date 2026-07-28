@@ -1,5 +1,7 @@
 #include "policy/image_ops.h"
 
+#include "wam/error.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>

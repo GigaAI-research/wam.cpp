@@ -1,6 +1,7 @@
 #include "policy/language_ops.h"
 
 #include "models/common/input_validation.h"
+#include "wam/error.h"
 
 #include <cmath>
 #include <cstring>

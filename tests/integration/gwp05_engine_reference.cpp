@@ -143,7 +143,7 @@ int main(int argc, char ** argv) {
                        "frozen replay tensor sizes changed");
 
     auto reader = GgufReader::open(model_path.string());
-    const wam::internal::policy::PolicySpecDraft policy_spec =
+    const wam::internal::policy::PolicySpec policy_spec =
         gwp05::read_legacy_policy_spec(*reader);
     const std::shared_ptr<const gwp05::ArtifactContract> artifact =
         gwp05::load_artifact(reader, policy_spec);
@@ -156,7 +156,7 @@ int main(int argc, char ** argv) {
             static_cast<std::size_t>(image.width) * 3U};
     };
     std::vector<std::int32_t> embedding_mask(64, 1);
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {
         image_view("camera_high", high),
         image_view("camera_left_wrist", left),
@@ -247,14 +247,14 @@ int main(int argc, char ** argv) {
     engine_session.reset();
     engine_model.reset();
 
-    wam::ModelOptions model_options;
-    model_options.artifact_path = model_path.string();
+    wam::RuntimeConfig model_options;
     model_options.backend = wam::Backend::automatic;
     model_options.compute_precision = wam::ComputePrecision::f32;
     model_options.language_mode =
         wam::LanguageRuntimeMode::external_embedding;
-    wam::Model * public_model = wam::model_load(model_options);
-    const wam::ModelInfo & public_info = wam::model_info(public_model);
+    wam::Model public_model =
+        wam::Model::load(model_path.string(), model_options);
+    const wam::ModelInfo & public_info = public_model.info();
     wam::test::require(public_info.capabilities.action &&
                            !public_info.capabilities.token_input &&
                            public_info.capabilities.precomputed_embedding &&
@@ -263,13 +263,12 @@ int main(int argc, char ** argv) {
                                wam::ComputePrecision::f32,
                        "public GWP model did not expose the Slice 5 runtime");
 
-    wam::SessionOptions public_session_options;
+    wam::SessionConfig public_session_options;
     public_session_options.random_seed = 20260713;
-    wam::Session * first_session =
-        wam::session_create(public_model, public_session_options);
-    wam::Session * second_session =
-        wam::session_create(public_model, public_session_options);
-    wam::model_free(public_model);
+    wam::Session first_session =
+        public_model.create_session(public_session_options);
+    wam::Session second_session =
+        public_model.create_session(public_session_options);
 
     const auto prediction_values = [](const wam::Prediction & prediction) {
         wam::test::require(
@@ -288,7 +287,7 @@ int main(int argc, char ** argv) {
     const std::vector<float> expected_public_action =
         read_f32(donor_root / "action.f32");
     const std::vector<float> first_values = prediction_values(
-        wam::predict(first_session, inputs));
+        first_session.predict(inputs));
     double public_mean = 0.0;
     double public_max = 0.0;
     wam::test::require(first_values.size() == expected_public_action.size(),
@@ -304,23 +303,20 @@ int main(int argc, char ** argv) {
     wam::test::require(public_mean <= 1.0e-3 && public_max <= 1.0e-2,
                        "public GWP action differs from donor recovery");
 
-    wam::Inputs random_inputs = inputs;
+    wam::Observation random_inputs = inputs;
     random_inputs.action_noise = {};
     const std::vector<float> first_random_values = prediction_values(
-        wam::predict(first_session, random_inputs));
+        first_session.predict(random_inputs));
     const std::vector<float> second_random_values = prediction_values(
-        wam::predict(second_session, random_inputs));
+        second_session.predict(random_inputs));
     wam::test::require(second_random_values == first_random_values,
                        "two GWP sessions did not isolate seeded RNG state");
 
-    wam::test::require(static_cast<bool>(wam::session_reset(first_session)),
-                       "public GWP session reset failed");
+    first_session.reset();
     const std::vector<float> reset_random_values = prediction_values(
-        wam::predict(first_session, random_inputs));
+        first_session.predict(random_inputs));
     wam::test::require(reset_random_values == first_random_values,
                        "public GWP reset did not restore the session seed");
-    wam::session_free(first_session);
-    wam::session_free(second_session);
 
     unsetenv("WAM_GWP05_DUMP_DIR");
     std::filesystem::remove_all(dump_root);

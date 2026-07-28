@@ -1,6 +1,6 @@
 #pragma once
 
-#include "wam/types.h"
+#include "wam/wam.h"
 
 #include <stdexcept>
 #include <string>

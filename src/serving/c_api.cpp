@@ -1,6 +1,5 @@
 #include "wam/c_api.h"
 
-#include "model_internal.h"
 #include "serving/protocol_adapter.h"
 #include "wam/wam.h"
 
@@ -8,16 +7,17 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string>
 #include <vector>
 
 struct wam_c_model {
-    wam::Model * value = nullptr;
+    std::unique_ptr<wam::Model> value;
 };
 
 struct wam_c_session {
-    wam::Session * value = nullptr;
+    std::unique_ptr<wam::Session> value;
 };
 
 namespace {
@@ -94,13 +94,13 @@ wam::TensorView tensor_view(const wam_c_tensor_view & source,
             static_cast<wam::ByteOrder>(source.byte_order)};
 }
 
-wam::Inputs runtime_inputs(const wam_c_predict_inputs & source) {
+wam::Observation runtime_inputs(const wam_c_predict_inputs & source) {
     require(source.image_count == 0 || source.images != nullptr,
             "images pointer is null", "inputs.images");
     require(source.token_count == 0 ||
                 (source.token_ids != nullptr && source.attention_mask != nullptr),
             "token pointers are null", "inputs.language");
-    wam::Inputs result;
+    wam::Observation result;
     result.images.reserve(source.image_count);
     for (std::size_t index = 0; index < source.image_count; ++index) {
         const wam_c_image & image = source.images[index];
@@ -159,7 +159,7 @@ void copy_prediction(const wam::Prediction & source,
         std::memcpy(target->action_shape, source.action.shape.data(),
                     source.action.shape.size() * sizeof(std::int64_t));
     }
-    const wam::Stats & stats = source.stats;
+    const wam::Telemetry & stats = source.telemetry;
     target->stats = {
         stats.preprocess_milliseconds, stats.model_milliseconds,
         stats.model_vision_milliseconds, stats.model_text_milliseconds,
@@ -205,8 +205,7 @@ int wam_c_model_create(const wam_c_model_options * options,
                 "model options size does not match ABI", "options.struct_size");
         require(options->artifact_path != nullptr,
                 "artifact path is null", "options.artifact_path");
-        wam::ModelOptions runtime;
-        runtime.artifact_path = options->artifact_path;
+        wam::RuntimeConfig runtime;
         runtime.backend = static_cast<wam::Backend>(options->backend);
         runtime.compute_precision =
             static_cast<wam::ComputePrecision>(options->compute_precision);
@@ -216,7 +215,8 @@ int wam_c_model_create(const wam_c_model_options * options,
             static_cast<wam::LanguageRuntimeMode>(options->language_mode);
         auto holder = new wam_c_model();
         try {
-            holder->value = wam::model_load(runtime);
+            holder->value = std::make_unique<wam::Model>(
+                wam::Model::load(options->artifact_path, runtime));
         } catch (...) {
             delete holder;
             throw;
@@ -233,10 +233,11 @@ int wam_c_model_metadata_json(const wam_c_model * model, char ** metadata_json,
         require(metadata_json != nullptr, "metadata output is null",
                 "metadata_json");
         *metadata_json = nullptr;
-        const wam::internal::ModelImpl & impl =
-            wam::internal::model_impl(model->value);
-        *metadata_json = copy_string(wam::serving::model_metadata_json(
-            impl.info(), impl.policy_spec()));
+        const wam::ModelInfo & info = model->value->info();
+        require(info.policy_spec != nullptr,
+                "model PolicySpec is unavailable", "model.policy_spec");
+        *metadata_json = copy_string(
+            wam::serving::model_metadata_json(info, *info.policy_spec));
     });
 }
 
@@ -253,9 +254,10 @@ int wam_c_session_create(wam_c_model * model,
         *session = nullptr;
         auto holder = new wam_c_session();
         try {
-            holder->value = wam::session_create(
-                model->value,
-                {options->enable_prefix_cache != 0, options->random_seed});
+            holder->value = std::make_unique<wam::Session>(
+                model->value->create_session(
+                    {options->enable_prefix_cache != 0,
+                     options->random_seed}));
         } catch (...) {
             delete holder;
             throw;
@@ -274,8 +276,8 @@ int wam_c_session_predict(wam_c_session * session,
         require(inputs != nullptr, "predict inputs are null", "inputs");
         require(prediction != nullptr, "prediction output is null", "prediction");
         std::memset(prediction, 0, sizeof(*prediction));
-        wam::Inputs runtime = runtime_inputs(*inputs);
-        copy_prediction(wam::predict(session->value, runtime), prediction);
+        wam::Observation runtime = runtime_inputs(*inputs);
+        copy_prediction(session->value->predict(runtime), prediction);
     });
 }
 
@@ -283,8 +285,7 @@ int wam_c_session_reset(wam_c_session * session, wam_c_error * error) {
     return guarded(error, [&] {
         require(session != nullptr && session->value != nullptr,
                 "session is null", "session");
-        const wam::Status status = wam::session_reset(session->value);
-        if (!status) throw wam::Error(status.code, status.message, status.details);
+        session->value->reset();
     });
 }
 
@@ -311,13 +312,11 @@ void wam_c_error_free(wam_c_error * error) {
 
 void wam_c_session_free(wam_c_session * session) {
     if (session == nullptr) return;
-    wam::session_free(session->value);
     delete session;
 }
 
 void wam_c_model_free(wam_c_model * model) {
     if (model == nullptr) return;
-    wam::model_free(model->value);
     delete model;
 }
 

@@ -1,6 +1,7 @@
 #include "models/fastwam/artifact.h"
 
 #include "models/common/gguf_reader.h"
+#include "wam/error.h"
 
 #include "ggml.h"
 
@@ -154,7 +155,7 @@ void require_component_count(const ArtifactComponentInfo & component,
 
 std::shared_ptr<const ArtifactContract> load_artifact(
     std::shared_ptr<GgufReader> reader,
-    const policy::PolicySpecDraft & policy_spec) {
+    const policy::PolicySpec & policy_spec) {
     if (!reader) {
         incompatible("FastWAM artifact reader is null", "artifact",
                      "internal error");
@@ -258,7 +259,7 @@ std::shared_ptr<const ArtifactContract> load_artifact(
 }
 
 void validate_artifact(const ArtifactContract & artifact,
-                       const policy::PolicySpecDraft & policy_spec) {
+                       const policy::PolicySpec & policy_spec) {
     semantics::validate_policy_semantics(policy_spec, artifact);
 }
 

@@ -1,6 +1,6 @@
 #include "models/gwp05/semantics.h"
 
-#include "wam/types.h"
+#include "wam/error.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,7 +34,7 @@ bool supported_normalization(policy::NormalizationKind kind) {
 } // namespace
 
 void validate_policy_semantics(
-    const policy::PolicySpecDraft & policy_spec) {
+    const policy::PolicySpec & policy_spec) {
     if (policy_spec.images.views.size() != 3) {
         invalid("the current GWP-0.5 artifact contract requires three views",
                 "wam.input.image.roles",

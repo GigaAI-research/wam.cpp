@@ -1,6 +1,7 @@
 #include "policy/state_ops.h"
 
 #include "models/common/input_validation.h"
+#include "wam/error.h"
 
 #include <algorithm>
 #include <cmath>

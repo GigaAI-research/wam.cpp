@@ -79,10 +79,10 @@ int main(int argc, char ** argv) {
         }
     }
 
-    const std::optional<policy::PolicySpecDraft> parsed =
-        policy::try_read_policy_spec_draft(*reader);
+    const std::optional<policy::PolicySpec> parsed =
+        policy::try_read_policy_spec(*reader);
     require(parsed.has_value(), "formal RoboTwin GGUF has no PolicySpec");
-    const policy::PolicySpecDraft & spec = *parsed;
+    const policy::PolicySpec & spec = *parsed;
     require(spec.identity.artifact_schema_version == 2 &&
                 spec.identity.profile ==
                     "gwp05_robotwin_dual_arm_14d_zscore" &&
@@ -130,18 +130,17 @@ int main(int argc, char ** argv) {
                 artifact->sequence_geometry.action_tokens == 48,
             "formal RoboTwin private geometry changed");
 
-    wam::ModelOptions options;
-    options.artifact_path = path.string();
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cpu_metadata;
     options.language_mode = wam::LanguageRuntimeMode::external_embedding;
-    wam::Model * model = wam::model_load(options);
-    const wam::ModelInfo & info = wam::model_info(model);
+    wam::Model model = wam::Model::load(path.string(), options);
+    const wam::ModelInfo & info = model.info();
     require(info.architecture == "gwp05" &&
-                info.artifact_policy == spec.identity.profile &&
+                info.policy_spec != nullptr &&
+                info.policy_spec->identity.profile == spec.identity.profile &&
                 info.artifact_bytes == reader->file_size() &&
                 info.capabilities.explicit_action_noise &&
                 !info.capabilities.action,
             "formal RoboTwin public metadata contract changed");
-    wam::model_free(model);
     return 0;
 }

@@ -3,7 +3,9 @@
 #include "models/gwp05/artifact.h"
 #include "models/common/model_types.h"
 #include "policy/observation_ops.h"
-#include "wam/types.h"
+#include "wam/observation.h"
+#include "wam/prediction.h"
+#include "wam/runtime_config.h"
 
 #include <optional>
 #include <random>
@@ -23,9 +25,9 @@ struct PreparedInputs {
 
 using CoreAction = model_common::CoreAction;
 
-PreparedInputs prepare_inputs(const Inputs & inputs,
+PreparedInputs prepare_inputs(const Observation & inputs,
                               const ArtifactContract & artifact,
-                              const policy::PolicySpecDraft & policy_spec,
+                              const policy::PolicySpec & policy_spec,
                               LanguageRuntimeMode language_mode,
                               std::mt19937 & session_rng,
                               const std::optional<FixedPrompt> & fixed_prompt =

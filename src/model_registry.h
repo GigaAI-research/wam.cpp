@@ -13,9 +13,9 @@ namespace wam::internal {
 class GgufReader;
 
 using ModelFactory = std::function<std::unique_ptr<ModelImpl>(
-    const ModelOptions & options,
+    const RuntimeConfig & options,
     ModelInfo info,
-    std::optional<policy::PolicySpecDraft> policy_spec,
+    std::optional<policy::PolicySpec> policy_spec,
     std::shared_ptr<GgufReader> reader)>;
 
 class ModelRegistry {

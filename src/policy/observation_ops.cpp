@@ -6,7 +6,7 @@
 namespace wam::internal::policy {
 
 PreparedObservation prepare_observation_reference(
-    const Inputs & inputs, const PolicySpecDraft & policy_spec,
+    const Observation & inputs, const PolicySpec & policy_spec,
     std::mt19937 & session_rng) {
     PreparedObservation prepared;
     const std::vector<std::size_t> order = resolve_image_order(

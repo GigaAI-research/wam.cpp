@@ -18,7 +18,7 @@ int main(int argc, char ** argv) {
     require(argc == 2, "FastWAM artifact test requires one GGUF path");
     auto reader = GgufReader::open(argv[1]);
     const auto policy_spec =
-        wam::internal::policy::try_read_policy_spec_draft(*reader);
+        wam::internal::policy::try_read_policy_spec(*reader);
     require(policy_spec.has_value(), "FastWAM PolicySpec is missing");
     const auto artifact = wam::internal::fastwam::load_artifact(
         reader, *policy_spec);
@@ -61,7 +61,7 @@ int main(int argc, char ** argv) {
             values.data(), values.size() * sizeof(float), wam::DType::f32,
             std::move(shape), layout, wam::ByteOrder::little};
     };
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {image("wrist", wrist), image("scene", scene)};
     inputs.state = f32(state, {8}, "D");
     inputs.action_noise = f32(noise, {32, 7}, "T,A");
@@ -82,7 +82,7 @@ int main(int argc, char ** argv) {
             "FastWAM common policy input boundary changed");
     wam::test::require_error(
         [&] {
-            wam::Inputs missing = inputs;
+            wam::Observation missing = inputs;
             missing.images.pop_back();
             (void) wam::internal::fastwam::prepare_inputs(
                 missing, *artifact, *policy_spec,
@@ -90,13 +90,13 @@ int main(int argc, char ** argv) {
         },
         wam::ErrorCode::invalid_argument, "missing FastWAM named view");
 
-    wam::ModelOptions options;
-    options.artifact_path = argv[1];
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cpu_metadata;
-    wam::Model * model = wam::model_load(options);
-    const wam::ModelInfo & info = wam::model_info(model);
+    wam::Model model = wam::Model::load(argv[1], options);
+    const wam::ModelInfo & info = model.info();
     require(info.architecture == "fastwam" &&
-                info.artifact_policy ==
+                info.policy_spec != nullptr &&
+                info.policy_spec->identity.profile ==
                     "fastwam_libero_2cam224_minmax" &&
                 info.backend == wam::Backend::cpu_metadata &&
                 info.language_mode ==
@@ -107,6 +107,5 @@ int main(int argc, char ** argv) {
                 info.capabilities.explicit_action_noise &&
                 !info.capabilities.action,
             "FastWAM metadata capabilities changed");
-    wam::model_free(model);
     return 0;
 }

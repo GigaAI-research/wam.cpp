@@ -2,7 +2,7 @@
 
 #include "models/fastwam/semantics.h"
 #include "policy/policy_spec.h"
-#include "wam/types.h"
+#include "wam/model.h"
 
 #include <cstdint>
 #include <memory>
@@ -51,9 +51,9 @@ struct ArtifactContract {
 
 std::shared_ptr<const ArtifactContract> load_artifact(
     std::shared_ptr<GgufReader> reader,
-    const policy::PolicySpecDraft & policy_spec);
+    const policy::PolicySpec & policy_spec);
 void validate_artifact(const ArtifactContract & artifact,
-                       const policy::PolicySpecDraft & policy_spec);
+                       const policy::PolicySpec & policy_spec);
 
 } // namespace fastwam
 } // namespace wam::internal

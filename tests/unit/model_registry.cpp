@@ -10,8 +10,8 @@
 namespace {
 
 wam::internal::ModelFactory unsupported_factory() {
-    return [](const wam::ModelOptions &, wam::ModelInfo,
-              std::optional<wam::internal::policy::PolicySpecDraft>,
+    return [](const wam::RuntimeConfig &, wam::ModelInfo,
+              std::optional<wam::internal::policy::PolicySpec>,
               std::shared_ptr<wam::internal::GgufReader>)
                -> std::unique_ptr<wam::internal::ModelImpl> {
         throw wam::Error(wam::ErrorCode::unsupported, "test factory");
@@ -27,7 +27,7 @@ void verify_builtin(wam::internal::Arch arch, bool expected) {
     if (factory != nullptr && arch == wam::internal::Arch::fastwam) {
         wam::test::require_error(
             [&] {
-                (*factory)(wam::ModelOptions{}, wam::ModelInfo{}, std::nullopt,
+                (*factory)(wam::RuntimeConfig{}, wam::ModelInfo{}, std::nullopt,
                            nullptr);
             },
             wam::ErrorCode::incompatible_artifact,

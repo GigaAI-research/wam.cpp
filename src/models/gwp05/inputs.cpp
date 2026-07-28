@@ -5,6 +5,7 @@
 #include "policy/image_ops.h"
 #include "policy/language_ops.h"
 #include "policy/state_ops.h"
+#include "wam/error.h"
 
 #include <algorithm>
 #include <string>
@@ -104,9 +105,9 @@ TokenInput fixed_prompt_view(const FixedPrompt & prompt) {
             ArrayView<std::int32_t>(prompt.attention_mask)};
 }
 
-void prepare_language(const Inputs & inputs,
+void prepare_language(const Observation & inputs,
                       const ArtifactContract & artifact,
-                      const policy::PolicySpecDraft & policy_spec,
+                      const policy::PolicySpec & policy_spec,
                       LanguageRuntimeMode language_mode,
                       const std::optional<FixedPrompt> & fixed_prompt,
                       PreparedInputs & prepared) {
@@ -183,8 +184,8 @@ void prepare_language(const Inputs & inputs,
 } // namespace
 
 PreparedInputs prepare_inputs(
-    const Inputs & inputs, const ArtifactContract & artifact,
-    const policy::PolicySpecDraft & policy_spec,
+    const Observation & inputs, const ArtifactContract & artifact,
+    const policy::PolicySpec & policy_spec,
     LanguageRuntimeMode language_mode,
     std::mt19937 & session_rng,
     const std::optional<FixedPrompt> & fixed_prompt) {

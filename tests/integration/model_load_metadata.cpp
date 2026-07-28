@@ -10,10 +10,9 @@ int main() {
     valid.set_string("general.architecture", "fastwam");
     valid.write(valid_file.string());
 
-    wam::ModelOptions options;
-    options.artifact_path = valid_file.string();
+    wam::RuntimeConfig options;
     wam::test::require_error(
-        [&] { (void) wam::model_load(options); },
+        [&] { (void) wam::Model::load(valid_file.string(), options); },
         wam::ErrorCode::incompatible_artifact,
         "valid PolicySpec must reach FastWAM artifact validation");
 
@@ -22,10 +21,11 @@ int main() {
     malformed.set_string("general.architecture", "fastwam");
     malformed.set_string("wam.output.action.recovery.kind", "guess");
     malformed.write(malformed_file.string());
-    wam::ModelOptions malformed_options;
-    malformed_options.artifact_path = malformed_file.string();
+    wam::RuntimeConfig malformed_options;
     wam::test::require_error(
-        [&] { (void) wam::model_load(malformed_options); },
+        [&] {
+            (void) wam::Model::load(malformed_file.string(), malformed_options);
+        },
         wam::ErrorCode::incompatible_artifact,
         "malformed PolicySpec must fail before the architecture factory");
 
@@ -33,10 +33,9 @@ int main() {
     wam::test::MetadataFixture unknown = wam::test::valid_policy_fixture();
     unknown.set_string("general.architecture", "pi05");
     unknown.write(unknown_file.string());
-    wam::ModelOptions unknown_options;
-    unknown_options.artifact_path = unknown_file.string();
+    wam::RuntimeConfig unknown_options;
     wam::test::require_error(
-        [&] { (void) wam::model_load(unknown_options); },
+        [&] { (void) wam::Model::load(unknown_file.string(), unknown_options); },
         wam::ErrorCode::unsupported, "unknown architecture must fail fast");
     return 0;
 }

@@ -1,6 +1,7 @@
 #include "models/fastwam/semantics.h"
 
 #include "models/fastwam/artifact.h"
+#include "wam/error.h"
 
 #include <limits>
 #include <string>
@@ -80,7 +81,7 @@ std::vector<std::int32_t> action_positions(
     return result;
 }
 
-void validate_policy_semantics(const policy::PolicySpecDraft & spec,
+void validate_policy_semantics(const policy::PolicySpec & spec,
                                const ArtifactContract & artifact) {
     const Geometry & geometry = artifact.geometry;
     if (spec.images.views.size() != geometry.num_cameras ||

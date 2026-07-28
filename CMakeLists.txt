@@ -107,7 +107,9 @@ target_link_libraries(wam_policy PRIVATE
     wam::backend_ggml)
 
 add_library(wam_runtime_base OBJECT
-    src/types.cpp
+    src/error.cpp
+    src/observation.cpp
+    src/prediction.cpp
     src/arch.cpp
     src/model_internal.cpp
     src/model_registry.cpp)
@@ -174,6 +176,7 @@ endif()
 
 add_library(wam_core_archive STATIC
     src/model.cpp
+    src/pipeline.cpp
     src/models/builtin_modules.cpp
     $<TARGET_OBJECTS:wam_artifact>
     $<TARGET_OBJECTS:wam_policy>

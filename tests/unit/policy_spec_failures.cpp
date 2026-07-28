@@ -18,7 +18,7 @@ void expect_failure(wam::test::MetadataFixture fixture,
     fixture.write(file.string());
     const auto reader = wam::internal::GgufReader::open(file.string());
     try {
-        (void) wam::internal::policy::try_read_policy_spec_draft(*reader);
+        (void) wam::internal::policy::try_read_policy_spec(*reader);
     } catch (const wam::Error & error) {
         wam::test::require(
             error.code() == wam::ErrorCode::incompatible_artifact,

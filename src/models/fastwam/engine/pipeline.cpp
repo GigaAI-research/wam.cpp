@@ -6,6 +6,8 @@
 #include "vae.h"
 #include "video_dit.h"
 
+#include "wam/error.h"
+
 #include "ggml.h"
 
 #include <chrono>

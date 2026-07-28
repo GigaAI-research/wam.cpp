@@ -1,5 +1,7 @@
 #include "models/gwp05/engine/engine_internal.h"
 
+#include "wam/error.h"
+
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -57,15 +59,15 @@ std::vector<float> embedding_as_f32(const Tensor & embedding) {
     return values;
 }
 
-void append_timing(Stats & output, const char * name, double milliseconds) {
+void append_timing(Telemetry & output, const char * name, double milliseconds) {
     if (milliseconds > 0.0) {
         output.model_timings.push_back({name, milliseconds});
     }
 }
 
-Stats public_stats(const Gwp05ModelArch & engine) {
+Telemetry public_stats(const Gwp05ModelArch & engine) {
     const EngineTelemetry & source = engine.stats;
-    Stats output;
+    Telemetry output;
     output.model_milliseconds = source.ms_total;
     output.model_vision_milliseconds = source.ms_vision;
     output.model_text_milliseconds = source.ms_umt5;

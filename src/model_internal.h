@@ -1,39 +1,41 @@
 #pragma once
 
 #include "policy/policy_spec.h"
-#include "wam/types.h"
+#include "wam/model.h"
+#include "wam/session.h"
 
 #include <memory>
-
-namespace wam {
-struct Model;
-}
 
 namespace wam::internal {
 
 class SessionImpl {
 public:
     virtual ~SessionImpl();
-    virtual Prediction predict(const Inputs & inputs) = 0;
-    virtual Status reset() = 0;
+    virtual Prediction predict(const Observation & observation) = 0;
+    virtual void reset() = 0;
 };
 
 class ModelImpl {
 public:
-    ModelImpl(ModelInfo info, policy::PolicySpecDraft policy_spec);
+    ModelImpl(ModelInfo info, PolicySpec policy_spec);
     virtual ~ModelImpl();
 
     const ModelInfo & info() const noexcept;
-    const policy::PolicySpecDraft & policy_spec() const noexcept;
+    const PolicySpec & policy_spec() const noexcept;
     virtual std::unique_ptr<SessionImpl> create_session(
-        const SessionOptions & options) = 0;
+        const SessionConfig & config) = 0;
 
 protected:
     ModelInfo info_;
-    policy::PolicySpecDraft policy_spec_;
+    PolicySpec policy_spec_;
 };
 
-Model * adopt_model(std::unique_ptr<ModelImpl> impl);
-const ModelImpl & model_impl(const Model * model);
+struct ModelAccess {
+    static Model adopt(std::unique_ptr<ModelImpl> impl);
+    static const ModelImpl & impl(const Model & model);
+};
+
+Model adopt_model(std::unique_ptr<ModelImpl> impl);
+const ModelImpl & model_impl(const Model & model);
 
 } // namespace wam::internal

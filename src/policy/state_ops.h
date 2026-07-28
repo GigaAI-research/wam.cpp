@@ -1,6 +1,7 @@
 #pragma once
 
 #include "policy/policy_spec.h"
+#include "wam/observation.h"
 
 #include <vector>
 

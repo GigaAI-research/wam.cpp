@@ -1,6 +1,7 @@
 #pragma once
 
-#include "wam/types.h"
+#include "wam/model.h"
+#include "wam/prediction.h"
 
 #include <cstdint>
 #include <vector>
@@ -9,7 +10,7 @@ namespace wam::internal::model_common {
 
 struct CoreAction {
     std::vector<float> values;
-    Stats stats;
+    Telemetry stats;
 };
 
 struct EngineInfo {

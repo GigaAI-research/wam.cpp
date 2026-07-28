@@ -1,6 +1,6 @@
 #include "models/common/scheduler.h"
 
-#include "wam/types.h"
+#include "wam/error.h"
 
 #include <cmath>
 #include <string>

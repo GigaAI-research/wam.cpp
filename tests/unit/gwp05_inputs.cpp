@@ -66,7 +66,7 @@ int main() {
     fixture.write(file.string());
     const auto reader = wam::internal::GgufReader::open(file.string());
     const auto spec =
-        *wam::internal::policy::try_read_policy_spec_draft(*reader);
+        *wam::internal::policy::try_read_policy_spec(*reader);
     const auto artifact = wam::internal::gwp05::load_artifact(reader, spec);
 
     const std::array<std::uint8_t, 12> scene{};
@@ -77,7 +77,7 @@ int main() {
     std::vector<std::int32_t> tokens = {5, 6, 0};
     std::vector<std::int32_t> token_mask = {1, 1, 0};
 
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {image("right_wrist", right), image("scene", scene),
                      image("left_wrist", left)};
     inputs.state = f32_view(state, {14}, "D");
@@ -111,7 +111,7 @@ int main() {
 
     std::vector<float> embedding_values(2 * 64, 0.125F);
     std::vector<std::int32_t> embedding_mask = {1, 1};
-    wam::Inputs embedding_inputs = inputs;
+    wam::Observation embedding_inputs = inputs;
     embedding_inputs.action_noise = {};
     wam::EmbeddingInput embedding;
     embedding.embedding =
@@ -129,7 +129,7 @@ int main() {
             "GWP external embedding contract changed");
 
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.images.pop_back();
         require_error(
             [&] {
@@ -140,7 +140,7 @@ int main() {
             wam::ErrorCode::invalid_argument, "missing GWP image");
     }
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.images[0].name = "scene";
         require_error(
             [&] {
@@ -151,7 +151,7 @@ int main() {
             wam::ErrorCode::invalid_argument, "duplicate GWP image");
     }
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.images[0].encoding = wam::ImageEncoding::jpeg;
         require_error(
             [&] {
@@ -162,7 +162,7 @@ int main() {
             wam::ErrorCode::unsupported, "encoded GWP image");
     }
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.state.dtype = wam::DType::bf16;
         require_error(
             [&] {
@@ -175,7 +175,7 @@ int main() {
     {
         std::vector<float> nonfinite_state = state;
         nonfinite_state[4] = std::numeric_limits<float>::infinity();
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.state = f32_view(nonfinite_state, {14}, "D");
         require_error(
             [&] {
@@ -187,7 +187,7 @@ int main() {
     }
     {
         std::vector<std::int32_t> bad_mask = {1, 0, 1};
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.language = wam::TokenInput{
             wam::ArrayView<std::int32_t>(tokens),
             wam::ArrayView<std::int32_t>(bad_mask)};
@@ -203,7 +203,7 @@ int main() {
     {
         std::vector<std::int32_t> bad_tokens = {5, 128};
         std::vector<std::int32_t> bad_mask = {1, 1};
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.language = wam::TokenInput{
             wam::ArrayView<std::int32_t>(bad_tokens),
             wam::ArrayView<std::int32_t>(bad_mask)};
@@ -217,7 +217,7 @@ int main() {
             "out-of-vocabulary GWP token");
     }
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.action_noise.shape = {1, 48, 32};
         require_error(
             [&] {
@@ -231,7 +231,7 @@ int main() {
     {
         std::vector<float> nonfinite_noise = noise;
         nonfinite_noise[0] = std::numeric_limits<float>::quiet_NaN();
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.action_noise = f32_view(nonfinite_noise, {48, 32}, "T,A");
         require_error(
             [&] {
@@ -243,7 +243,7 @@ int main() {
             "non-finite GWP action noise");
     }
     {
-        wam::Inputs bad = inputs;
+        wam::Observation bad = inputs;
         bad.history.push_back({"reference_latent", {}});
         require_error(
             [&] {

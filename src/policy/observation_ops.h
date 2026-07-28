@@ -2,7 +2,7 @@
 
 #include "policy/image_ops.h"
 #include "policy/policy_spec.h"
-#include "wam/types.h"
+#include "wam/observation.h"
 
 #include <random>
 #include <vector>
@@ -17,7 +17,7 @@ struct PreparedObservation {
 };
 
 PreparedObservation prepare_observation_reference(
-    const Inputs & inputs, const PolicySpecDraft & policy_spec,
+    const Observation & inputs, const PolicySpec & policy_spec,
     std::mt19937 & session_rng);
 
 } // namespace wam::internal::policy

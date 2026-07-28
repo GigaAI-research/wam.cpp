@@ -9,17 +9,15 @@
 
 namespace {
 
-wam::Model * load(wam::test::MetadataFixture fixture,
-                  const std::string & stem,
-                  wam::ModelOptions options = {}) {
+wam::Model load(wam::test::MetadataFixture fixture, const std::string & stem,
+                wam::RuntimeConfig options = {}) {
     wam::test::TempFile file(stem);
     fixture.write(file.string());
-    options.artifact_path = file.string();
     if (options.backend == wam::Backend::automatic) {
         options.backend = wam::Backend::cpu_metadata;
     }
     try {
-        return wam::model_load(options);
+        return wam::Model::load(file.string(), options);
     } catch (const wam::Error & error) {
         std::string message = stem + ": " + error.what();
         for (const wam::ErrorDetail & detail : error.details()) {
@@ -37,11 +35,10 @@ void expect_load_error(const std::string & stem, wam::ErrorCode code,
         wam::test::valid_gwp05_policy_fixture();
     mutator(fixture);
     fixture.write(file.string());
-    wam::ModelOptions options;
-    options.artifact_path = file.string();
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cpu_metadata;
-    wam::test::require_error([&] { (void) wam::model_load(options); }, code,
-                             stem);
+    wam::test::require_error(
+        [&] { (void) wam::Model::load(file.string(), options); }, code, stem);
 }
 
 } // namespace
@@ -49,12 +46,13 @@ void expect_load_error(const std::string & stem, wam::ErrorCode code,
 int main() {
     using wam::test::require;
 
-    wam::Model * draft = load(wam::test::valid_gwp05_policy_fixture(),
-                              "gwp05-draft");
-    const wam::ModelInfo & draft_info = wam::model_info(draft);
+    wam::Model draft = load(wam::test::valid_gwp05_policy_fixture(),
+                            "gwp05-draft");
+    const wam::ModelInfo & draft_info = draft.info();
     require(draft_info.architecture == "gwp05", "GWP architecture changed");
-    require(draft_info.artifact_policy ==
-                "gwp05_robotwin_dual_arm_fixture",
+    require(draft_info.policy_spec != nullptr &&
+                draft_info.policy_spec->identity.profile ==
+                    "gwp05_robotwin_dual_arm_fixture",
             "draft PolicySpec profile was not retained");
     require(draft_info.backend == wam::Backend::cpu_metadata,
             "metadata backend was not retained");
@@ -69,52 +67,44 @@ int main() {
                 draft_info.capabilities.explicit_action_noise,
             "GWP Slice 3 capabilities are inconsistent");
     wam::test::require_error(
-        [&] { (void) wam::session_create(draft); },
+        [&] { (void) draft.create_session(); },
         wam::ErrorCode::unsupported,
         "metadata-only GWP model must not create an execution session");
-    wam::model_free(draft);
-
-    wam::Model * robotwin = load(
+    wam::Model robotwin = load(
         wam::test::valid_gwp05_robotwin_14d_policy_fixture(),
         "gwp05-robotwin-14d");
-    require(wam::model_info(robotwin).artifact_policy ==
-                "gwp05_robotwin_dual_arm_14d_zscore",
+    require(robotwin.info().policy_spec != nullptr &&
+                robotwin.info().policy_spec->identity.profile ==
+                    "gwp05_robotwin_dual_arm_14d_zscore",
             "audited RoboTwin PolicySpec was not retained");
-    require(!wam::model_info(robotwin).capabilities.action &&
-                wam::model_info(robotwin).capabilities.explicit_action_noise,
+    require(!robotwin.info().capabilities.action &&
+                robotwin.info().capabilities.explicit_action_noise,
             "audited RoboTwin fixture crossed the Slice 3 boundary");
-    wam::model_free(robotwin);
-
-    wam::Model * legacy = load(wam::test::valid_gwp05_legacy_fixture(),
-                               "gwp05-legacy");
-    require(wam::model_info(legacy).artifact_policy ==
-                "legacy-gwp05-dual-arm-32d-quantile",
+    wam::Model legacy = load(wam::test::valid_gwp05_legacy_fixture(),
+                             "gwp05-legacy");
+    require(legacy.info().policy_spec != nullptr &&
+                legacy.info().policy_spec->identity.profile ==
+                    "legacy-gwp05-dual-arm-32d-quantile",
             "legacy GWP PolicySpec was not constructed");
-    wam::model_free(legacy);
-
-    wam::ModelOptions embedding_options;
+    wam::RuntimeConfig embedding_options;
     embedding_options.language_mode =
         wam::LanguageRuntimeMode::external_embedding;
-    wam::Model * embedding = load(
+    wam::Model embedding = load(
         wam::test::valid_gwp05_policy_fixture(), "gwp05-embedding",
         embedding_options);
-    require(wam::model_info(embedding).language_mode ==
+    require(embedding.info().language_mode ==
                 wam::LanguageRuntimeMode::external_embedding,
             "explicit embedding mode was not retained");
-    require(!wam::model_info(embedding).capabilities.token_input &&
-                wam::model_info(embedding).capabilities.precomputed_embedding,
+    require(!embedding.info().capabilities.token_input &&
+                embedding.info().capabilities.precomputed_embedding,
             "embedding runtime capabilities are inconsistent");
-    wam::model_free(embedding);
-
-    wam::ModelOptions fixed_options;
+    wam::RuntimeConfig fixed_options;
     fixed_options.fixed_prompt = wam::FixedPrompt{{5, 6}, {1, 1}};
-    wam::Model * fixed = load(wam::test::valid_gwp05_policy_fixture(),
-                              "gwp05-fixed-prompt", fixed_options);
-    require(!wam::model_info(fixed).capabilities.arbitrary_token_input &&
-                wam::model_info(fixed).capabilities.fixed_token_input,
+    wam::Model fixed = load(wam::test::valid_gwp05_policy_fixture(),
+                            "gwp05-fixed-prompt", fixed_options);
+    require(!fixed.info().capabilities.arbitrary_token_input &&
+                fixed.info().capabilities.fixed_token_input,
             "fixed prompt capabilities are inconsistent");
-    wam::model_free(fixed);
-
     expect_load_error("gwp05-private-dimension", wam::ErrorCode::incompatible_artifact,
                       [](wam::test::MetadataFixture & fixture) {
                           fixture.set_u32("gwp05.action_dim", 31);
@@ -141,11 +131,13 @@ int main() {
         wam::test::valid_gwp05_legacy_fixture();
     legacy_shape.set_u32("gwp05.action_chunk", 2);
     legacy_shape.write(legacy_shape_file.string());
-    wam::ModelOptions legacy_shape_options;
-    legacy_shape_options.artifact_path = legacy_shape_file.string();
+    wam::RuntimeConfig legacy_shape_options;
     legacy_shape_options.backend = wam::Backend::cpu_metadata;
     wam::test::require_error(
-        [&] { (void) wam::model_load(legacy_shape_options); },
+        [&] {
+            (void) wam::Model::load(legacy_shape_file.string(),
+                                    legacy_shape_options);
+        },
         wam::ErrorCode::unsupported,
         "unknown legacy GWP geometry must not be guessed");
 
@@ -155,11 +147,13 @@ int main() {
         wam::test::valid_gwp05_legacy_fixture();
     robotwin_legacy.set_u32("gwp05.action_dim", 14);
     robotwin_legacy.write(robotwin_legacy_file.string());
-    wam::ModelOptions robotwin_legacy_options;
-    robotwin_legacy_options.artifact_path = robotwin_legacy_file.string();
+    wam::RuntimeConfig robotwin_legacy_options;
     robotwin_legacy_options.backend = wam::Backend::cpu_metadata;
     wam::test::require_error(
-        [&] { (void) wam::model_load(robotwin_legacy_options); },
+        [&] {
+            (void) wam::Model::load(robotwin_legacy_file.string(),
+                                    robotwin_legacy_options);
+        },
         wam::ErrorCode::unsupported,
         "14D RoboTwin artifacts must carry an explicit PolicySpec");
 
@@ -167,12 +161,11 @@ int main() {
     wam::test::MetadataFixture backend_fixture =
         wam::test::valid_gwp05_policy_fixture();
     backend_fixture.write(backend_file.string());
-    wam::ModelOptions backend_options;
-    backend_options.artifact_path = backend_file.string();
+    wam::RuntimeConfig backend_options;
     backend_options.backend = wam::Backend::cpu_metadata;
     backend_options.compute_precision = wam::ComputePrecision::bf16;
     wam::test::require_error(
-        [&] { (void) wam::model_load(backend_options); },
+        [&] { (void) wam::Model::load(backend_file.string(), backend_options); },
         wam::ErrorCode::unsupported,
         "metadata-only GWP loading must reject BF16 execution precision");
     return 0;

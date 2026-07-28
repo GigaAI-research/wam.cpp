@@ -6,8 +6,11 @@ namespace wam::internal {
 
 SessionImpl::~SessionImpl() = default;
 
-ModelImpl::ModelImpl(ModelInfo info, policy::PolicySpecDraft policy_spec)
-    : info_(std::move(info)), policy_spec_(std::move(policy_spec)) {}
+ModelImpl::ModelImpl(ModelInfo info, PolicySpec policy_spec)
+    : info_(std::move(info)),
+      policy_spec_(std::move(policy_spec)) {
+    info_.policy_spec = std::make_shared<const PolicySpec>(policy_spec_);
+}
 
 ModelImpl::~ModelImpl() = default;
 
@@ -15,7 +18,7 @@ const ModelInfo & ModelImpl::info() const noexcept {
     return info_;
 }
 
-const policy::PolicySpecDraft & ModelImpl::policy_spec() const noexcept {
+const PolicySpec & ModelImpl::policy_spec() const noexcept {
     return policy_spec_;
 }
 

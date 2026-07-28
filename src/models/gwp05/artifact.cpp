@@ -1,6 +1,7 @@
 #include "models/gwp05/artifact.h"
 
 #include "models/common/gguf_reader.h"
+#include "wam/error.h"
 
 #include <algorithm>
 #include <cmath>
@@ -162,7 +163,7 @@ policy::NormalizationStats read_legacy_stats(const GgufReader & reader,
 
 } // namespace
 
-policy::PolicySpecDraft read_legacy_policy_spec(const GgufReader & reader) {
+policy::PolicySpec read_legacy_policy_spec(const GgufReader & reader) {
     if (reader.has("wam.artifact_schema_version")) {
         incompatible("legacy GWP migration received a schema artifact",
                      "wam.artifact_schema_version", "unexpected key");
@@ -189,9 +190,9 @@ policy::PolicySpecDraft read_legacy_policy_spec(const GgufReader & reader) {
                     "gwp05", "unsupported legacy geometry");
     }
 
-    policy::PolicySpecDraft spec;
+    policy::PolicySpec spec;
     spec.identity.artifact_schema_version =
-        policy::kPolicySpecDraftSchemaVersion;
+        policy::kPolicySpecSchemaVersion;
     spec.identity.profile = "legacy-gwp05-dual-arm-32d-quantile";
     spec.identity.checkpoint_revision = "legacy-unversioned";
     spec.identity.training_dataset = "legacy-unknown";
@@ -258,18 +259,18 @@ policy::PolicySpecDraft read_legacy_policy_spec(const GgufReader & reader) {
     spec.action.recovery.reference_state_indices = {
         0, 1, 2, 3, 4, 5, -1, 7, 8, 9, 10, 11, 12, -1};
 
-    policy::validate_policy_spec_draft(spec);
+    policy::validate_policy_spec(spec);
     semantics::validate_policy_semantics(spec);
     return spec;
 }
 
 void validate_artifact(const ArtifactContract & artifact,
-                       const policy::PolicySpecDraft & policy_spec) {
+                       const policy::PolicySpec & policy_spec) {
     if (artifact.reader == nullptr) {
         throw Error(ErrorCode::internal,
                     "GWP artifact has no backing GGUF reader");
     }
-    policy::validate_policy_spec_draft(policy_spec);
+    policy::validate_policy_spec(policy_spec);
     try {
         semantics::validate_policy_semantics(policy_spec);
     } catch (const Error & error) {
@@ -282,7 +283,7 @@ void validate_artifact(const ArtifactContract & artifact,
     const GgufReader & reader = *artifact.reader;
     if (!artifact.legacy_policy_spec &&
         !reader.has("gwp05.t5_max_length")) {
-        incompatible("draft GWP artifact is missing text capacity",
+        incompatible("GWP artifact is missing text capacity",
                      "gwp05.t5_max_length", "missing");
     }
     if (reader.has("gwp05.architecture") &&
@@ -319,7 +320,7 @@ void validate_artifact(const ArtifactContract & artifact,
 
 std::shared_ptr<const ArtifactContract> load_artifact(
     std::shared_ptr<GgufReader> reader,
-    const policy::PolicySpecDraft & policy_spec) {
+    const policy::PolicySpec & policy_spec) {
     if (reader == nullptr) {
         throw Error(ErrorCode::internal,
                     "cannot load GWP artifact from a null GGUF reader");

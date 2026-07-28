@@ -1,20 +1,12 @@
 #include "support/test_utils.h"
 
-#include "wam/types.h"
+#include "wam/wam.h"
 
 #include <cstdint>
 #include <vector>
 
 int main() {
     using wam::test::require;
-
-    const wam::Status success = wam::Status::success();
-    require(static_cast<bool>(success), "success status must be truthy");
-    require(success.code == wam::ErrorCode::ok,
-            "success status must use ErrorCode::ok");
-
-    const wam::Status failure{wam::ErrorCode::unsupported, "unsupported", {}};
-    require(!static_cast<bool>(failure), "error status must be falsey");
 
     const wam::Error error(wam::ErrorCode::invalid_argument, "bad option",
                            {{"field", "reason"}});
@@ -53,5 +45,10 @@ int main() {
     require(tensor.empty(), "default Tensor must be empty");
     tensor.data.push_back(byte);
     require(!tensor.empty(), "Tensor with storage reported empty");
+
+    wam::PolicyActionChunk action(std::move(tensor));
+    action.shape = {1, 1};
+    require(action.horizon() == 1 && action.action_dimension() == 1,
+            "PolicyActionChunk shape semantics changed");
     return 0;
 }

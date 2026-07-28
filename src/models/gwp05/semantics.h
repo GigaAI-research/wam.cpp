@@ -61,7 +61,7 @@ struct PromptPlan {
     std::size_t valid_tokens = 0;
 };
 
-void validate_policy_semantics(const policy::PolicySpecDraft & policy_spec);
+void validate_policy_semantics(const policy::PolicySpec & policy_spec);
 SequenceGeometry resolve_sequence_geometry(const StructuralConfig & config);
 TokenLayout complete_mot_layout(const SequenceGeometry & geometry);
 std::vector<std::int32_t> action_positions(std::int64_t action_tokens,

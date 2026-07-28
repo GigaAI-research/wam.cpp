@@ -1,7 +1,10 @@
 #include <wam/wam.h>
 
+#include <type_traits>
+
+static_assert(std::is_move_constructible<wam::Pipeline>::value,
+              "installed Pipeline must be complete and movable");
+
 int main() {
-    wam::model_free(nullptr);
-    wam::session_free(nullptr);
-    return wam::Status::success() ? 0 : 1;
+    return wam::dtype_size(wam::DType::f32) == sizeof(float) ? 0 : 1;
 }

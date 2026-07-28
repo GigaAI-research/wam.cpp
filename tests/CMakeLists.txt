@@ -34,12 +34,29 @@ target_compile_options(wam_test_fixtures PRIVATE
 
 wam_add_test(wam_public_api_contract contracts/public_api_compile.cpp)
 wam_add_test(wam_header_wam_contract contracts/header_wam.cpp)
-wam_add_test(wam_header_types_contract contracts/header_types.cpp)
+wam_add_test(wam_header_error_contract contracts/header_error.cpp)
+wam_add_test(wam_header_observation_contract contracts/header_observation.cpp)
+wam_add_test(wam_header_prediction_contract contracts/header_prediction.cpp)
+wam_add_test(wam_header_policy_spec_contract contracts/header_policy_spec.cpp)
+wam_add_test(wam_header_runtime_config_contract contracts/header_runtime_config.cpp)
+wam_add_test(wam_header_model_contract contracts/header_model.cpp)
+wam_add_test(wam_header_session_contract contracts/header_session.cpp)
+wam_add_test(wam_header_pipeline_contract contracts/header_pipeline.cpp)
 wam_add_test(wam_header_version_contract contracts/header_version.cpp)
 wam_add_test(wam_header_c_api_contract contracts/header_c_api.cpp)
 wam_add_test(wam_types_unit unit/types.cpp)
 wam_add_test(wam_registry_unit unit/model_registry.cpp)
-wam_add_test(wam_model_lifecycle integration/model_lifecycle.cpp)
+add_executable(wam_model_lifecycle
+    integration/model_lifecycle.cpp
+    fixtures/fake_public_model.cpp)
+target_link_libraries(wam_model_lifecycle PRIVATE wam::core)
+target_include_directories(wam_model_lifecycle PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(wam_model_lifecycle PRIVATE cxx_std_17)
+target_compile_options(wam_model_lifecycle PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+add_test(NAME wam_model_lifecycle COMMAND wam_model_lifecycle)
 wam_add_test(wam_gguf_reader_unit unit/gguf_reader.cpp)
 wam_add_test(wam_input_validation_unit unit/input_validation.cpp)
 wam_add_test(wam_policy_spec_unit unit/policy_spec.cpp)
@@ -306,7 +323,6 @@ if(WAM_BUILD_FASTWAM)
 endif()
 
 target_include_directories(wam_registry_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(wam_model_lifecycle PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_gguf_reader_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_input_validation_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(wam_policy_spec_unit PRIVATE ${PROJECT_SOURCE_DIR}/src)

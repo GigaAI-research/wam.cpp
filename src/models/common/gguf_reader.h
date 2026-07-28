@@ -1,6 +1,6 @@
 #pragma once
 
-#include "wam/types.h"
+#include "wam/observation.h"
 
 #include <cstddef>
 #include <cstdint>

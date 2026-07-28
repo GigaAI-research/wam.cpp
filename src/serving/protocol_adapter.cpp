@@ -62,6 +62,7 @@ void string_array(std::ostringstream & output,
 const char * backend_name(Backend value) {
     switch (value) {
         case Backend::automatic: return "automatic";
+        case Backend::cpu: return "cpu";
         case Backend::cuda: return "cuda";
         case Backend::cpu_metadata: return "cpu_metadata";
         case Backend::unknown: return "unknown";
@@ -103,7 +104,6 @@ const char * enum_name(E value);
             ? names[index] : "unknown";                               \
     }
 
-using namespace internal::policy;
 WAM_ENUM_NAMES(ResizeMode, "none", "stretch", "cover_center_crop")
 WAM_ENUM_NAMES(InterpolationMode, "nearest", "bilinear", "bicubic")
 WAM_ENUM_NAMES(ResampleBoundaryMode, "truncate", "clamp")
@@ -145,7 +145,7 @@ void normalization_json(std::ostringstream & output,
     output << '}';
 }
 
-void policy_json(std::ostringstream & output, const PolicySpecDraft & spec) {
+void policy_json(std::ostringstream & output, const PolicySpec & spec) {
     output << "{\"artifact_schema_version\":"
            << spec.identity.artifact_schema_version
            << ",\"profile\":" << quote(spec.identity.profile)
@@ -223,14 +223,14 @@ void policy_json(std::ostringstream & output, const PolicySpecDraft & spec) {
 } // namespace
 
 std::string model_metadata_json(const ModelInfo & info,
-                                const internal::policy::PolicySpecDraft & spec) {
+                                const PolicySpec & spec) {
     std::ostringstream output;
     output << "{\"runtime_version\":{\"major\":" << WAM_VERSION_MAJOR
            << ",\"minor\":" << WAM_VERSION_MINOR
            << ",\"patch\":" << WAM_VERSION_PATCH
            << "},\"protocol_version\":{\"major\":0,\"minor\":5}"
            << ",\"architecture\":" << quote(info.architecture)
-           << ",\"artifact_policy\":" << quote(info.artifact_policy)
+           << ",\"artifact_policy\":" << quote(spec.identity.profile)
            << ",\"artifact_sha256\":\"\""
            << ",\"artifact_bytes\":" << info.artifact_bytes
            << ",\"backend\":" << quote(backend_name(info.backend))

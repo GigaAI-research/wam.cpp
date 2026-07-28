@@ -14,9 +14,9 @@ int main() {
     const auto reader = wam::internal::GgufReader::open(file.string());
 
     const auto loaded =
-        wam::internal::policy::try_read_policy_spec_draft(*reader);
+        wam::internal::policy::try_read_policy_spec(*reader);
     require(loaded.has_value(), "valid PolicySpec was not detected");
-    const wam::internal::policy::PolicySpecDraft & spec = *loaded;
+    const wam::internal::policy::PolicySpec & spec = *loaded;
     require(spec.identity.artifact_schema_version == 2,
             "schema version changed");
     require(spec.identity.profile == "synthetic_2cam_joint",
@@ -57,7 +57,7 @@ int main() {
     legacy.write(legacy_file.string());
     const auto legacy_reader =
         wam::internal::GgufReader::open(legacy_file.string());
-    require(!wam::internal::policy::try_read_policy_spec_draft(*legacy_reader)
+    require(!wam::internal::policy::try_read_policy_spec(*legacy_reader)
                  .has_value(),
             "artifact without schema marker must remain a legacy candidate");
     return 0;

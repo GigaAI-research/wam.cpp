@@ -69,22 +69,21 @@ int main(int argc, char ** argv) {
         read_array<float>(root / "noise.f32", 32U * 7U);
     const std::vector<float> expected =
         read_array<float>(root / "expected-action.f32", 32U * 7U);
-    wam::ModelOptions options;
-    options.artifact_path = argv[1];
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cuda;
     options.compute_precision = wam::ComputePrecision::bf16;
     options.language_mode = wam::LanguageRuntimeMode::external_embedding;
-    wam::Model * model = wam::model_load(options);
-    wam::SessionOptions session_options;
+    wam::Model model = wam::Model::load(argv[1], options);
+    wam::SessionConfig session_options;
     session_options.random_seed = 20260726;
-    wam::Session * session = wam::session_create(model, session_options);
+    wam::Session session = model.create_session(session_options);
 
     const auto image = [](const char * name,
                           const std::vector<std::uint8_t> & pixels) {
         return wam::ImageView{name, wam::ImageEncoding::rgb_u8, pixels.data(),
                               pixels.size(), 224, 224, 3, 224U * 3U};
     };
-    wam::Inputs inputs;
+    wam::Observation inputs;
     inputs.images = {image("wrist", wrist), image("scene", scene)};
     inputs.state = f32_view(state, {8}, "D");
     inputs.action_noise = f32_view(noise, {32, 7}, "T,A");
@@ -94,7 +93,7 @@ int main(int argc, char ** argv) {
         {mask.data(), mask.size() * sizeof(std::int32_t), wam::DType::i32,
          {128}, "T", wam::ByteOrder::little}};
 
-    const wam::Prediction prediction = wam::predict(session, inputs);
+    const wam::Prediction prediction = session.predict(inputs);
     require(prediction.action.dtype == wam::DType::f32 &&
                 prediction.action.shape ==
                     std::vector<std::int64_t>({32, 7}) &&
@@ -129,29 +128,25 @@ int main(int argc, char ** argv) {
             std::to_string(mean) + " max_abs=" +
             std::to_string(maximum));
     }
-    require(prediction.stats.model_vision_milliseconds > 0.0 &&
-                prediction.stats.model_prefill_milliseconds > 0.0 &&
-                prediction.stats.model_decode_milliseconds > 0.0 &&
-                prediction.stats.model_timings.size() == 3,
+    require(prediction.telemetry.model_vision_milliseconds > 0.0 &&
+                prediction.telemetry.model_prefill_milliseconds > 0.0 &&
+                prediction.telemetry.model_decode_milliseconds > 0.0 &&
+                prediction.telemetry.model_timings.size() == 3,
             "FastWAM phase timing contract changed");
 
     inputs.action_noise = {};
-    const wam::Prediction first_random = wam::predict(session, inputs);
-    const wam::Prediction second_random = wam::predict(session, inputs);
+    const wam::Prediction first_random = session.predict(inputs);
+    const wam::Prediction second_random = session.predict(inputs);
     require(first_random.action.data != second_random.action.data,
             "FastWAM session RNG did not advance between predictions");
-    wam::Session * peer_session = wam::session_create(model, session_options);
-    const wam::Prediction peer_random = wam::predict(peer_session, inputs);
+    wam::Session peer_session = model.create_session(session_options);
+    const wam::Prediction peer_random = peer_session.predict(inputs);
     require(first_random.action.data == peer_random.action.data,
             "FastWAM engine sessions do not own independent RNG state");
-    require(static_cast<bool>(wam::session_reset(session)),
-            "FastWAM session reset failed");
-    const wam::Prediction reset_random = wam::predict(session, inputs);
+    session.reset();
+    const wam::Prediction reset_random = session.predict(inputs);
     require(first_random.action.data == reset_random.action.data,
             "FastWAM session reset did not restore its random noise sequence");
 
-    wam::session_free(peer_session);
-    wam::session_free(session);
-    wam::model_free(model);
     return 0;
 }

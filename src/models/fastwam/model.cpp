@@ -6,6 +6,7 @@
 #include "models/fastwam/engine/engine.h"
 #include "models/fastwam/inputs.h"
 #include "model_internal.h"
+#include "wam/error.h"
 #include "policy/action_ops.h"
 
 #include <chrono>
@@ -18,21 +19,21 @@ namespace {
 
 Prediction make_prediction(const CoreAction & core,
                            const PreparedInputs & inputs,
-                           const policy::PolicySpecDraft & policy_spec) {
+                           const policy::PolicySpec & policy_spec) {
     policy::validate_core_action(core.values, policy_spec.action);
     const policy::PolicyActionChunk action = policy::decode_action_reference(
         core.values, inputs.observation.raw_state, policy_spec.action,
         policy_spec.action.stats);
     Prediction prediction;
     prediction.action = policy::make_action_tensor(action);
-    prediction.stats = core.stats;
+    prediction.telemetry = core.stats;
     return prediction;
 }
 
 class FastWamSessionImpl final : public SessionImpl {
 public:
     FastWamSessionImpl(std::shared_ptr<const ArtifactContract> artifact,
-                       policy::PolicySpecDraft policy_spec,
+                       policy::PolicySpec policy_spec,
                        engine::EngineSessionPtr engine_session,
                        std::uint64_t random_seed)
         : artifact_(std::move(artifact)),
@@ -41,7 +42,7 @@ public:
           random_seed_(random_seed),
           rng_(static_cast<std::mt19937::result_type>(random_seed)) {}
 
-    Prediction predict(const Inputs & inputs) override {
+    Prediction predict(const Observation & inputs) override {
         using clock = std::chrono::steady_clock;
         std::lock_guard<std::mutex> lock(mutex_);
         const auto total_begin = clock::now();
@@ -56,26 +57,25 @@ public:
         const CoreAction core = engine::predict(*engine_session_, prepared);
         const auto postprocess_begin = clock::now();
         Prediction prediction = make_prediction(core, prepared, policy_spec_);
-        prediction.stats.preprocess_milliseconds = preprocess_milliseconds;
-        prediction.stats.postprocess_milliseconds =
+        prediction.telemetry.preprocess_milliseconds = preprocess_milliseconds;
+        prediction.telemetry.postprocess_milliseconds =
             std::chrono::duration<double, std::milli>(
                 clock::now() - postprocess_begin).count();
-        prediction.stats.total_milliseconds =
+        prediction.telemetry.total_milliseconds =
             std::chrono::duration<double, std::milli>(
                 clock::now() - total_begin).count();
         return prediction;
     }
 
-    Status reset() override {
+    void reset() override {
         std::lock_guard<std::mutex> lock(mutex_);
         engine::reset(*engine_session_);
         rng_.seed(static_cast<std::mt19937::result_type>(random_seed_));
-        return Status::success();
     }
 
 private:
     std::shared_ptr<const ArtifactContract> artifact_;
-    policy::PolicySpecDraft policy_spec_;
+    policy::PolicySpec policy_spec_;
     engine::EngineSessionPtr engine_session_;
     std::uint64_t random_seed_ = 0;
     std::mt19937 rng_;
@@ -84,14 +84,14 @@ private:
 
 class FastWamModelImpl final : public ModelImpl {
 public:
-    FastWamModelImpl(ModelInfo info, policy::PolicySpecDraft policy_spec,
+    FastWamModelImpl(ModelInfo info, policy::PolicySpec policy_spec,
                      std::shared_ptr<const ArtifactContract> artifact,
                      engine::EnginePtr engine)
         : ModelImpl(std::move(info), std::move(policy_spec)),
           artifact_(std::move(artifact)), engine_(std::move(engine)) {}
 
     std::unique_ptr<SessionImpl> create_session(
-        const SessionOptions & options) override {
+        const SessionConfig & options) override {
         if (!engine_) {
             throw Error(ErrorCode::unsupported,
                         "metadata-only FastWAM model cannot create a session",
@@ -110,9 +110,9 @@ private:
 } // namespace
 
 std::unique_ptr<ModelImpl> create_model(
-    const ModelOptions & options,
+    const RuntimeConfig & options,
     ModelInfo info,
-    std::optional<policy::PolicySpecDraft> policy_spec,
+    std::optional<policy::PolicySpec> policy_spec,
     std::shared_ptr<GgufReader> reader) {
     if (reader == nullptr || !policy_spec.has_value()) {
         throw Error(ErrorCode::incompatible_artifact,
@@ -127,10 +127,9 @@ std::unique_ptr<ModelImpl> create_model(
         throw Error(ErrorCode::unsupported,
                     "FastWAM external embedding mode does not accept fixed tokens");
     }
-    policy::PolicySpecDraft resolved_spec = std::move(*policy_spec);
+    policy::PolicySpec resolved_spec = std::move(*policy_spec);
     std::shared_ptr<const ArtifactContract> artifact =
         load_artifact(std::move(reader), resolved_spec);
-    info.artifact_policy = resolved_spec.identity.profile;
     info.language_mode = LanguageRuntimeMode::external_embedding;
     info.artifact_components = artifact->components;
     engine::EnginePtr runtime;

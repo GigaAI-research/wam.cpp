@@ -1,6 +1,7 @@
 #include "policy/policy_spec.h"
 
 #include "models/common/gguf_reader.h"
+#include "wam/error.h"
 
 #include <algorithm>
 #include <cctype>
@@ -345,7 +346,7 @@ bool rectangles_overlap(const ImagePlacement & first,
 
 } // namespace
 
-std::optional<PolicySpecDraft> try_read_policy_spec_draft(
+std::optional<PolicySpec> try_read_policy_spec(
     const GgufReader & reader) {
     if (!reader.has("wam.artifact_schema_version")) {
         if (reader.has("wam.policy.profile") ||
@@ -357,12 +358,12 @@ std::optional<PolicySpecDraft> try_read_policy_spec_draft(
         return std::nullopt;
     }
 
-    PolicySpecDraft spec;
+    PolicySpec spec;
     spec.identity.artifact_schema_version =
         reader.require_u32("wam.artifact_schema_version");
     if (spec.identity.artifact_schema_version !=
-        kPolicySpecDraftSchemaVersion) {
-        incompatible("unsupported PolicySpec draft schema version",
+        kPolicySpecSchemaVersion) {
+        incompatible("unsupported PolicySpec schema version",
                      "wam.artifact_schema_version",
                      std::to_string(spec.identity.artifact_schema_version));
     }
@@ -533,14 +534,14 @@ std::optional<PolicySpecDraft> try_read_policy_spec_draft(
     spec.state.stats = read_stats(reader, "state", spec.state.model_dim);
     spec.action.stats = read_stats(reader, "action", spec.action.model_dim);
 
-    validate_policy_spec_draft(spec);
+    validate_policy_spec(spec);
     return spec;
 }
 
-void validate_policy_spec_draft(const PolicySpecDraft & spec) {
+void validate_policy_spec(const PolicySpec & spec) {
     if (spec.identity.artifact_schema_version !=
-        kPolicySpecDraftSchemaVersion) {
-        incompatible("PolicySpec draft schema version is invalid",
+        kPolicySpecSchemaVersion) {
+        incompatible("PolicySpec schema version is invalid",
                      "wam.artifact_schema_version",
                      std::to_string(spec.identity.artifact_schema_version));
     }
@@ -826,11 +827,11 @@ void validate_policy_spec_draft(const PolicySpecDraft & spec) {
     }
 }
 
-std::size_t policy_image_count(const PolicySpecDraft & spec) noexcept {
+std::size_t policy_image_count(const PolicySpec & spec) noexcept {
     return spec.images.views.size();
 }
 
-const ImageTransformSpec & require_image_spec(const PolicySpecDraft & spec,
+const ImageTransformSpec & require_image_spec(const PolicySpec & spec,
                                               const std::string & role) {
     const auto found = std::find_if(
         spec.images.views.begin(), spec.images.views.end(),

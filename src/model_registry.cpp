@@ -1,5 +1,7 @@
 #include "model_registry.h"
 
+#include "wam/error.h"
+
 #include <utility>
 
 namespace wam::internal {

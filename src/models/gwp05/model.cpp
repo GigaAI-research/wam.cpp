@@ -6,6 +6,7 @@
 #include "models/gwp05/engine/engine.h"
 #include "models/gwp05/inputs.h"
 #include "models/gwp05/semantics.h"
+#include "wam/error.h"
 #include "policy/action_ops.h"
 
 #include <algorithm>
@@ -28,7 +29,7 @@ bool supports_embedding(policy::LanguageInputMode mode) {
 }
 
 LanguageRuntimeMode resolve_language_mode(
-    const ModelOptions & options, const policy::PolicySpecDraft & spec) {
+    const RuntimeConfig & options, const policy::PolicySpec & spec) {
     LanguageRuntimeMode result = options.language_mode;
     if (result == LanguageRuntimeMode::automatic) {
         result = supports_tokens(spec.language.input_mode)
@@ -65,7 +66,7 @@ LanguageRuntimeMode resolve_language_mode(
 
 Prediction make_prediction(const CoreAction & core,
                            const PreparedInputs & prepared,
-                           const policy::PolicySpecDraft & spec) {
+                           const policy::PolicySpec & spec) {
     const policy::ActionSpec & action = spec.action;
     policy::validate_core_action(core.values, action);
     const policy::PolicyActionChunk action_chunk =
@@ -73,14 +74,14 @@ Prediction make_prediction(const CoreAction & core,
             core.values, prepared.observation.raw_state, action, action.stats);
     Prediction prediction;
     prediction.action = policy::make_action_tensor(action_chunk);
-    prediction.stats = core.stats;
+    prediction.telemetry = core.stats;
     return prediction;
 }
 
 class Gwp05SessionImpl final : public SessionImpl {
 public:
     Gwp05SessionImpl(std::shared_ptr<const ArtifactContract> artifact,
-                     policy::PolicySpecDraft policy_spec,
+                     policy::PolicySpec policy_spec,
                      LanguageRuntimeMode language_mode,
                      std::optional<FixedPrompt> fixed_prompt,
                      engine::EngineSessionPtr engine_session,
@@ -93,7 +94,7 @@ public:
           random_seed_(random_seed),
           rng_(static_cast<std::mt19937::result_type>(random_seed)) {}
 
-    Prediction predict(const Inputs & inputs) override {
+    Prediction predict(const Observation & inputs) override {
         using clock = std::chrono::steady_clock;
         std::lock_guard<std::mutex> lock(mutex_);
         const auto total_begin = clock::now();
@@ -108,26 +109,25 @@ public:
         const CoreAction core = engine::predict(*engine_session_, prepared);
         const auto postprocess_begin = clock::now();
         Prediction prediction = make_prediction(core, prepared, policy_spec_);
-        prediction.stats.preprocess_milliseconds = preprocess_milliseconds;
-        prediction.stats.postprocess_milliseconds =
+        prediction.telemetry.preprocess_milliseconds = preprocess_milliseconds;
+        prediction.telemetry.postprocess_milliseconds =
             std::chrono::duration<double, std::milli>(
                 clock::now() - postprocess_begin).count();
-        prediction.stats.total_milliseconds =
+        prediction.telemetry.total_milliseconds =
             std::chrono::duration<double, std::milli>(
                 clock::now() - total_begin).count();
         return prediction;
     }
 
-    Status reset() override {
+    void reset() override {
         std::lock_guard<std::mutex> lock(mutex_);
         engine::reset(*engine_session_);
         rng_.seed(static_cast<std::mt19937::result_type>(random_seed_));
-        return Status::success();
     }
 
 private:
     std::shared_ptr<const ArtifactContract> artifact_;
-    policy::PolicySpecDraft policy_spec_;
+    policy::PolicySpec policy_spec_;
     LanguageRuntimeMode language_mode_ = LanguageRuntimeMode::automatic;
     std::optional<FixedPrompt> fixed_prompt_;
     engine::EngineSessionPtr engine_session_;
@@ -138,7 +138,7 @@ private:
 
 class Gwp05ModelImpl final : public ModelImpl {
 public:
-    Gwp05ModelImpl(ModelInfo info, policy::PolicySpecDraft policy_spec,
+    Gwp05ModelImpl(ModelInfo info, policy::PolicySpec policy_spec,
                    std::shared_ptr<const ArtifactContract> artifact,
                    std::optional<FixedPrompt> fixed_prompt,
                    engine::EnginePtr engine)
@@ -148,7 +148,7 @@ public:
           engine_(std::move(engine)) {}
 
     std::unique_ptr<SessionImpl> create_session(
-        const SessionOptions & options) override {
+        const SessionConfig & options) override {
         if (!engine_) {
             throw Error(ErrorCode::unsupported,
                         "metadata-only GWP model cannot create a session",
@@ -174,8 +174,8 @@ void resolve_metadata_backend(ModelInfo & info) {
 }
 
 void set_capabilities(ModelInfo & info,
-                      const policy::PolicySpecDraft & spec,
-                      const ModelOptions & options,
+                      const policy::PolicySpec & spec,
+                      const RuntimeConfig & options,
                       const ArtifactContract & artifact, bool action) {
     Capabilities & capabilities = info.capabilities;
     capabilities.action = action;
@@ -214,21 +214,20 @@ void set_capabilities(ModelInfo & info,
 } // namespace
 
 std::unique_ptr<ModelImpl> create_model(
-    const ModelOptions & options,
+    const RuntimeConfig & options,
     ModelInfo info,
-    std::optional<policy::PolicySpecDraft> policy_spec,
+    std::optional<policy::PolicySpec> policy_spec,
     std::shared_ptr<GgufReader> reader) {
     if (reader == nullptr) {
         throw Error(ErrorCode::internal,
                     "GWP05 factory received a null GGUF reader");
     }
-    policy::PolicySpecDraft resolved_spec = policy_spec.has_value()
+    policy::PolicySpec resolved_spec = policy_spec.has_value()
         ? std::move(*policy_spec)
         : read_legacy_policy_spec(*reader);
     std::shared_ptr<const ArtifactContract> artifact =
         load_artifact(std::move(reader), resolved_spec);
 
-    info.artifact_policy = resolved_spec.identity.profile;
     info.language_mode = resolve_language_mode(options, resolved_spec);
     if (options.fixed_prompt.has_value()) {
         (void) semantics::prepare_prompt(

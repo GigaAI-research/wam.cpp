@@ -52,12 +52,12 @@ struct ArtifactContract {
     bool legacy_policy_spec = false;
 };
 
-policy::PolicySpecDraft read_legacy_policy_spec(const GgufReader & reader);
+policy::PolicySpec read_legacy_policy_spec(const GgufReader & reader);
 std::shared_ptr<const ArtifactContract> load_artifact(
     std::shared_ptr<GgufReader> reader,
-    const policy::PolicySpecDraft & policy_spec);
+    const policy::PolicySpec & policy_spec);
 void validate_artifact(const ArtifactContract & artifact,
-                       const policy::PolicySpecDraft & policy_spec);
+                       const policy::PolicySpec & policy_spec);
 
 } // namespace gwp05
 } // namespace wam::internal

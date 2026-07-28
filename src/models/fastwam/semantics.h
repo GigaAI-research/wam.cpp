@@ -40,7 +40,7 @@ struct VisualPositions {
 SequenceGeometry resolve_geometry(const GeometryInput & input);
 VisualPositions visual_positions(const SequenceGeometry & geometry);
 std::vector<std::int32_t> action_positions(const SequenceGeometry & geometry);
-void validate_policy_semantics(const policy::PolicySpecDraft & policy_spec,
+void validate_policy_semantics(const policy::PolicySpec & policy_spec,
                                const ArtifactContract & artifact);
 
 } // namespace semantics

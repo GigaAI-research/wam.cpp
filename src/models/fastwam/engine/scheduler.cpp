@@ -1,6 +1,6 @@
 #include "scheduler.h"
 
-#include "wam/types.h"
+#include "wam/error.h"
 
 #include "ggml.h"
 

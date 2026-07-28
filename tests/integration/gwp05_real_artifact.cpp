@@ -64,7 +64,7 @@ int main(int argc, char ** argv) {
     require_tensor(*reader, "state_q01", wam::DType::f32);
     require_tensor(*reader, "action_q99", wam::DType::f32);
 
-    const wam::internal::policy::PolicySpecDraft spec =
+    const wam::internal::policy::PolicySpec spec =
         wam::internal::gwp05::read_legacy_policy_spec(*reader);
     require(spec.identity.profile ==
                 "legacy-gwp05-dual-arm-32d-quantile",
@@ -107,13 +107,12 @@ int main(int argc, char ** argv) {
                 artifact->sequence_geometry.action_tokens == 48,
             "real GWP token geometry changed");
 
-    wam::ModelOptions options;
-    options.artifact_path = path.string();
+    wam::RuntimeConfig options;
     options.backend = wam::Backend::cpu_metadata;
     options.language_mode =
         wam::LanguageRuntimeMode::external_embedding;
-    wam::Model * model = wam::model_load(options);
-    const wam::ModelInfo & info = wam::model_info(model);
+    wam::Model model = wam::Model::load(path.string(), options);
+    const wam::ModelInfo & info = model.info();
     require(info.architecture == "gwp05" &&
                 info.artifact_bytes == reader->file_size(),
             "public model metadata differs from the GGUF reader");
@@ -121,9 +120,8 @@ int main(int argc, char ** argv) {
                 info.capabilities.explicit_action_noise,
             "Slice 3 capability boundary changed");
     wam::test::require_error(
-        [&] { (void) wam::session_create(model); },
+        [&] { (void) model.create_session(); },
         wam::ErrorCode::unsupported,
         "Slice 4A must remain metadata-only");
-    wam::model_free(model);
     return 0;
 }
