@@ -25,10 +25,10 @@ approximately 11 GiB UMT5 encoder.
 
 ```bash
 docker exec -it gwp_zyj bash
-cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5
+cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6
 
 export CUDA_VISIBLE_DEVICES=4
-export PYTHONPATH=$PWD/eval
+export PYTHONPATH=$PWD/python
 
 python -u eval/sim/run_libero_server.py \
   --library build-fastwam-cuda-release/libwam_c_api.so \
@@ -61,9 +61,9 @@ source /root/miniconda3/etc/profile.d/conda.sh
 conda activate liberox
 export MUJOCO_GL=egl
 
-python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_libero_client.py \
+python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_libero_client.py \
   --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
-  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/build-fastwam-cuda-release/wam.desc \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-fastwam-cuda-release/wam.desc \
   --suite libero_spatial \
   --task-id 0 \
   --episode-index 0 \
@@ -93,7 +93,7 @@ available init-state count. The manifest freezes simulator seed, explicit action
 image resolution, wait steps, replan steps, gripper conversion and maximum episode steps.
 
 ```bash
-python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_libero_client.py \
+python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_libero_client.py \
   --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
   --create-manifest /tmp/libero-spatial-task0-20.json \
   --suite libero_spatial \
@@ -109,9 +109,9 @@ python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/ru
 frozen manifest after starting the same server command shown above:
 
 ```bash
-python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_libero_client.py \
+python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_libero_client.py \
   --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
-  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/build-gate-b-serving-checkpoint-cuda/wam.desc \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-gate-b-serving-checkpoint-cuda/wam.desc \
   --manifest /tmp/libero-spatial-task0-20.json \
   --output-dir /tmp/libero-spatial-task0-20-results \
   --host 172.17.0.6 \

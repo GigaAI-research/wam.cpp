@@ -10,7 +10,7 @@ from types import MethodType
 
 import numpy as np
 
-from common.language import (
+from wam.language import (
     PreparedLanguage, WanUmt5EmbeddingProvider, _apply_wan_prompt_padding,
     create_language_provider)
 

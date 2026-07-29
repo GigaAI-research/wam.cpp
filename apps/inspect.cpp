@@ -45,17 +45,32 @@ int main(int argc, char ** argv) {
         std::cout << '}'
                   << ",\"policy_spec\":";
         if (policy_spec.has_value()) {
+            std::vector<std::string> image_roles;
+            image_roles.reserve(policy_spec->images.views.size());
+            for (const wam::ImageTransformSpec & view :
+                 policy_spec->images.views) {
+                image_roles.push_back(view.role);
+            }
             std::cout << "{\"schema_version\":"
                       << policy_spec->identity.artifact_schema_version
                       << ",\"profile\":"
                       << wam::apps::json_string(policy_spec->identity.profile)
-                      << ",\"image_count\":"
-                      << policy_spec->images.views.size()
-                      << ",\"state_dim\":" << policy_spec->state.real_dim
+                      << ",\"image_roles\":";
+            wam::apps::write_json_strings(std::cout, image_roles);
+            std::cout << ",\"state_dim\":" << policy_spec->state.real_dim
+                      << ",\"state_fields\":";
+            wam::apps::write_json_strings(
+                std::cout, policy_spec->state.fields);
+            std::cout << ",\"language_max_tokens\":"
+                      << policy_spec->language.max_tokens
                       << ",\"action_horizon\":"
                       << policy_spec->action.horizon
                       << ",\"action_dim\":"
-                      << policy_spec->action.real_dim << '}';
+                      << policy_spec->action.real_dim
+                      << ",\"action_fields\":";
+            wam::apps::write_json_strings(
+                std::cout, policy_spec->action.fields);
+            std::cout << '}';
         } else {
             std::cout << "null";
         }

@@ -651,6 +651,23 @@ Phase 8 尚未执行的外部门禁：
 
 验收：新用户只阅读 README 和示例即可完成本地/远程首次预测；扩展者只阅读对应指南即可新增模型或环境，不需要阅读 GWP05/FastWAM 全部实现。
 
+Phase 9 实施结果：
+
+- 已将 README 从 0.5/Slice 过程记录重写为 0.6 用户入口，提供 Release 构建、`wam-inspect`、`wam-validate`、`wam-predict`、Python `Pipeline`、`wam-serve`、远程 `Client` 和 CMake install consumer 的连续五分钟路径。C++、Python local 和 Python remote 示例均位于 `examples/`。
+- `wam-inspect` 现在除 architecture/profile/维度外，还输出准确的 image roles、state fields、action fields 和 language token 长度，使用者无需阅读模型源码即可准备输入；CLI 集成测试冻结这些字段。
+- 已增加 Artifact Bundle、Adding a Model、Adding an Environment、Serving、Evaluation 和 Support Matrix 六份独立指南，并将 `ARCHITECTURE.md` 重写为当前实现及可执行依赖规则。模型扩展指南不要求理解另一个模型实现，环境扩展指南不要求理解模型数学。
+- 已增加 GitHub Actions CPU Release workflow，使用官方 `actions/checkout@v6` 与 `actions/setup-python@v6`，执行默认 Release configure/build/CTest。现有 wheel 隔离安装和纯 C/C++ `find_package` consumer 继续作为默认测试门禁。
+- 已增加 release documentation contract，自动检查 0.6 版本一致性、五分钟命令、必需指南/示例/CI、所有本地 Markdown 链接以及正式 inspect 入口，禁止恢复旧 inspector、根目录 0.5 plan 和迁移盘点。
+- 已删除 `plan.md`、`MIGRATION_INVENTORY.md`、两个重复 Python inspector、合并式 serving/evaluation 文档，以及 Phase 8 的 `eval/common` 兼容 facade。环境 runner 和 RPC/language tests 现在直接依赖正式 `wam` SDK；真实 benchmark/audit 文档和外部 parity oracle 保留。
+- converter 只发布 schema-v3 revision，删除 Python helper 中不再被使用的旧 converter revision 集合；schema-v2 与 legacy GWP05 读取路径仍只作为冻结迁移 oracle，不构成 0.6 artifact 兼容承诺。
+- 发布验证结果：默认 CPU 44/44、关闭 GWP05/FastWAM/Serving 的 Runtime-only 30/30、CUDA 12.4 + cuDNN + `sm_80` 44/44；Python release/boundary tests 和全部脚本语法检查通过。
+
+Phase 9 尚未执行的外部门禁：
+
+- GitHub Actions workflow 已在本地等价容器矩阵验证，但只有推送到 GitHub 后才能取得 hosted runner 状态；本阶段不伪造远端 CI 成功记录。
+- 当前工作区未配置 Phase 5/6 的真实 GGUF、冻结 observation/noise/reference action 和三个 simulator checkout，因此没有重新执行真实 local/remote Prediction parity 或 simulator smoke。Phase 8 记录的外部门禁继续有效，默认合成测试不能替代它们。
+- 0.6 发布完成定义中的“GWP05 与 FastWAM 所有目标组合均通过真实数值 parity 和 simulator smoke”尚未满足；文档与打包阶段完成不等价于可以发布全部组合。
+
 ## 7. 测试体系
 
 ### 7.1 默认无外部资产测试

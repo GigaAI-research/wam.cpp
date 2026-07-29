@@ -118,10 +118,10 @@ int main(int argc, char ** argv) {
             "public model metadata differs from the GGUF reader");
     require(!info.capabilities.action &&
                 info.capabilities.explicit_action_noise,
-            "Slice 3 capability boundary changed");
+            "GWP05 metadata capability boundary changed");
     wam::test::require_error(
         [&] { (void) model.create_session(); },
         wam::ErrorCode::unsupported,
-        "Slice 4A must remain metadata-only");
+        "the metadata backend must not create a compute session");
     return 0;
 }

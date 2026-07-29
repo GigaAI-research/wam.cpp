@@ -65,7 +65,7 @@ int main() {
                 draft_info.capabilities.token_input &&
                 !draft_info.capabilities.precomputed_embedding &&
                 draft_info.capabilities.explicit_action_noise,
-            "GWP Slice 3 capabilities are inconsistent");
+            "GWP05 metadata capabilities are inconsistent");
     wam::test::require_error(
         [&] { (void) draft.create_session(); },
         wam::ErrorCode::unsupported,
@@ -79,7 +79,7 @@ int main() {
             "audited RoboTwin PolicySpec was not retained");
     require(!robotwin.info().capabilities.action &&
                 robotwin.info().capabilities.explicit_action_noise,
-            "audited RoboTwin fixture crossed the Slice 3 boundary");
+            "audited RoboTwin metadata fixture exposed compute unexpectedly");
     wam::Model legacy = load(wam::test::valid_gwp05_legacy_fixture(),
                              "gwp05-legacy");
     require(legacy.info().policy_spec != nullptr &&

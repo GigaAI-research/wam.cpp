@@ -190,7 +190,7 @@ PreparedInputs prepare_inputs(
     std::mt19937 & session_rng,
     const std::optional<FixedPrompt> & fixed_prompt) {
     if (!inputs.history.empty()) {
-        unsupported("GWP Slice 3 does not expose history tensors",
+        unsupported("GWP05 does not accept history tensors",
                     "history", "must be empty");
     }
 

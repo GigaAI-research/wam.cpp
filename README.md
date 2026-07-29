@@ -1,88 +1,177 @@
-# wam.cpp 0.5
+# wam.cpp 0.6
 
-This branch is being rebuilt in verified vertical slices. Slice 7 provides the formal
-`wam_core` target, model/session lifecycle, architecture registry, a pinned GGUF reader,
-a validated internal `PolicySpecDraft`, the GWP05 metadata/input contract, and the private
-GWP05 engine connected to the public Model/Session lifecycle. PolicySpec-driven image,
-state, action-noise, and action-decode operations now form the boundary around that engine,
-with a structured C ABI and WebSocket/Protobuf evaluation serving path above it.
+`wam.cpp` is a C++17 runtime and Python SDK for local and remote inference of
+robot policy models stored as GGUF artifacts. Version 0.6 provides two built-in
+model architectures, a stable C++ API, C ABI v4, an installable Python package,
+and a Protobuf/WebSocket serving path.
 
-`Backend::cpu_metadata` loads and cross-validates draft or known legacy GWP05 metadata without
-allocating model weights and deliberately rejects session creation. `Backend::automatic` or
-`Backend::cuda` loads the private engine, exposes action capability, and supports public
-load/create/predict/reset/free lifecycle. The current verified legacy F32 path accepts canonical
-named RGB images and raw state, sends only a prepared composite image, normalized/padded state,
-and complete action noise into the engine, and returns decoded F32
-`[horizon, real_action_dim]` actions. Slice 7 adds the WebSocket/Protobuf server and
-RoboTwin client adapter. FastWAM now has an opt-in CUDA/BF16 engine and verified
-LIBERO Gate B paths; unsupported profiles still fail explicitly and never return
-placeholder actions.
+The runtime owns checkpoint preprocessing, model execution, and action recovery.
+Environment adapters own simulator/controller conventions. This boundary keeps
+GWP05 and FastWAM independent from RoboTwin, LIBERO, and LIBERO-X.
+
+## Five-minute start
+
+Prerequisites are CMake 3.22+, a C++17 compiler, `patch`, Python 3.9+, and
+`protoc` when serving is enabled. The first configure downloads the pinned
+llama.cpp `b9866` archive. For an offline build, set `WAM_LLAMA_ARCHIVE` to the
+archive or `WAM_LLAMA_SOURCE_DIR` to an existing source tree.
 
 ```bash
-cmake -S . -B build -DWAM_BUILD_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWAM_BUILD_TESTS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-llama.cpp `b9866` is pinned by archive hash and the GWP engine patches are applied during
-Slice 4 builds. Offline builds can set
-`WAM_LLAMA_ARCHIVE=/path/to/b9866.tar.gz` or point `WAM_LLAMA_SOURCE_DIR` at an existing
-source tree. The default build enables the CPU reference backend; CUDA is opt-in with
-`WAM_CUDA=ON` and an explicit `CMAKE_CUDA_ARCHITECTURES`, while the BF16 VAE build path
-also requires `WAM_CUDNN=ON`. The current GWP contract accepts decoded `rgb_u8` named images, little-endian F32
-state, tokens or an external embedding as declared by PolicySpec, and optional little-endian
-F32 `[horizon, model_action_dim]` action noise.
+Inspecting an artifact does not allocate model weights or require a GPU. It
+prints the architecture, exact image roles, state/action fields and dimensions,
+language length, bundle resources, and artifact size. Validation additionally
+runs the selected model architecture's metadata and tensor contract.
 
-The model entry points can be configured independently with `WAM_BUILD_GWP05` and
-`WAM_BUILD_FASTWAM`. Ignored upstream simulator directories remain managed by the eval setup
-scripts.
+```bash
+./build/wam-inspect /path/to/policy.gguf
+./build/wam-validate /path/to/policy.gguf
+```
 
-Environment/runtime integration and deployable model readiness are tracked separately.
-FastWAM LIBERO passes its formal MuJoCo 3.3.2 four-suite gate: donor Python
-achieves `1935/2000` (`96.75%`) and wam.cpp achieves `1938/2000` (`96.90%`)
-on the same 50 ordered init states per task. See
-`eval/sim/FASTWAM_LIBERO_BASELINE_AUDIT.md` for the frozen manifests and
-interpretation.
+Install the Python SDK and run one local prediction from an NPZ input. The NPZ
+must contain F32 `state` and HWC U8 `image.<role>` arrays matching
+`wam-inspect`; it may contain prepared language arrays or use `--instruction`
+with tokenizer resources supplied by an artifact bundle.
 
-For FastWAM LIBERO-X, the client/server adapter, z-score PolicySpec, GGUF artifact gate,
-same-input numerical parity, and fixed-manifest donor/wam.cpp rollout agreement are complete.
-The audited step 50k training run has an invalid resumed cosine-scheduler trajectory and only
-two independent demonstrations for the exact frozen SCENE1 task, so its GGUF is an integration
-fixture rather than a supported model. A reliable LIBERO-X checkpoint must be retrained and
-pass the same gates before success-rate claims are published; see
-`eval/sim/FASTWAM_LIBEROX_REMOTE_EVAL.md`.
+```bash
+python -m pip install .
+wam-predict /path/to/policy-bundle input.npz \
+  --library "$PWD/build/libwam_c_api.so" \
+  --instruction "pick up the cup" --output action.npy
+```
 
-Slice 4A through Slice 6 add opt-in external gates for a real GWP05 GGUF, the frozen donor tensor
-manifest, private-engine F32 stage parity, and public multi-session lifecycle parity. See
-`tests/reference/README.md`. These gates keep models and replay payloads out of
-Git. A formal 14-dimension z-score RoboTwin PolicySpec GGUF passes the
-converter/inspector/artifact gates and independent public CUDA/BF16 numerical
-parity on A800. The Slice 7 cross-container `beat_block_hammer` smoke test also succeeded at
-step 106 (`1/1`). The subsequent fixed-manifest 100-episode benchmark completed at
-`87/100` (`87.0%`) with 378 action-chunk requests and no RPC/runtime failure; steady-state
-client infer, RPC, and server-total means were `132.29`, `130.77`, and `124.98 ms` on an
-A800 BF16 server. See `eval/sim/ROBOTWIN_REMOTE_EVAL.md` for the manifest digest, latency
-groups, and result paths.
+The equivalent Python API is intentionally short:
 
-## Verified checkpoint (2026-07-29)
+```python
+import numpy as np
+import wam
 
-The current vertical implementation passes Release CPU and CUDA 12.4 builds. The CPU build
-passes all 20 configured tests. The A800 `sm_80` CUDA build passes all 24 configured tests,
-including WebSocket/Protobuf RPC, language-provider padding semantics, the formal GWP05
-RoboTwin BF16 public-Session parity gate, and the FastWAM LIBERO artifact and action-parity
-gates. A real prediction through the Python/C ABI bridge returns the expected `[48, 14]`
-GWP05 action and preserves the engine's named vision, text, prefill, and decode timings.
-External GGUF, numerical fixtures, checkpoints, simulator checkouts, and raw rollout results
-remain outside Git.
+with wam.Pipeline.load(
+    "/path/to/policy-bundle",
+    library="build/libwam_c_api.so",
+    runtime_config=wam.RuntimeConfig(backend="cuda", precision="bf16"),
+) as pipeline:
+    prediction = pipeline.predict(
+        images, np.asarray(state, dtype=np.float32),
+        instruction="pick up the cup")
+```
 
-Phase 8 publishes C ABI v4, the installable `wam` Python SDK, and the
-`wam.rpc.v06` serving/evaluation stack. The current default CPU and CUDA 12.4 + cuDNN
-`sm_80` matrices each pass 43/43 tests; the Runtime-only build with GWP05, FastWAM, and
-Serving disabled passes 29/29. These matrices include pure-C and C++
-install consumers, wheel build and isolated installation, context-managed native loading,
-structured error ownership, bundle language-resource discovery, and the `wam-predict`
-and `wam-serve` entry points. The transport-neutral service core, formal RoboTwin/LIBERO/
-LIBERO-X adapters and shared eval utilities are described in `docs/serving-evaluation.md`.
-Real-model cross-language parity remains an opt-in
-external gate because its GGUF, frozen observations, and reference actions are not stored
-in Git.
+To serve the same artifact, use the descriptor generated by CMake. The server
+derives architecture, camera count, action shape, and language mode from the
+artifact and rejects an incompatible environment before creating a session.
+
+```bash
+wam-serve --library "$PWD/build/libwam_c_api.so" \
+  --descriptor "$PWD/build/wam.desc" \
+  --model /path/to/policy-bundle --environment robotwin \
+  --backend cuda --precision bf16
+```
+
+```python
+import wam
+
+with wam.Client("127.0.0.1", 18060, "build/wam.desc", "robotwin") as client:
+    action, stats = client.predict(images, state, "pick up the cup")
+```
+
+The complete local API and ownership rules are in
+[Python SDK](docs/python-sdk.md). See [Artifact Bundle](docs/artifact-bundle.md)
+for deployment layout and [Serving](docs/serving.md) for protocol and process
+details.
+
+## C++ consumption
+
+Install the project and consume the exported CMake package. `wam::Pipeline`
+owns one Model and Session; buffers referenced by `wam::Observation` only need
+to remain alive for the duration of `predict()`.
+
+```bash
+cmake --install build --prefix "$PWD/install"
+cmake -S your-app -B your-app/build -DCMAKE_PREFIX_PATH="$PWD/install"
+```
+
+```cmake
+find_package(wam 0.6 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE wam::core)
+```
+
+```cpp
+#include <wam/wam.h>
+
+wam::Pipeline pipeline = wam::Pipeline::load("policy.gguf");
+wam::Prediction prediction = pipeline.predict(observation);
+```
+
+A compilable minimal function is provided in
+[examples/cpp/predict.cpp](examples/cpp/predict.cpp). The install consumer test
+builds both C++ and pure-C applications against the installed package.
+
+## Architecture and extensions
+
+The dependency direction is fixed:
+
+```text
+apps / serving / adapters / eval
+                 |
+          public wam API
+                 |
+ artifact + policy + runtime
+                 |
+       model implementations
+                 |
+          GGML backend
+```
+
+Public headers never expose GGML or model-private types. A model module contains
+its contract, resources/session state, readable pipeline, and mathematical
+networks. An environment adapter contains only observation and controller
+semantics. Start with the relevant guide:
+
+- [Architecture](ARCHITECTURE.md)
+- [Adding a Model](docs/adding-a-model.md)
+- [Adding an Environment](docs/adding-an-environment.md)
+- [Evaluation](docs/evaluation.md)
+
+## Supported scope
+
+The authoritative model/environment readiness, benchmark evidence, and known
+limitations are in [Support Matrix](docs/support-matrix.md). In summary:
+
+- Built-in architectures: GWP05 and FastWAM.
+- Backends: CUDA for prediction; CPU metadata mode for inspection/validation.
+- Environments: RoboTwin, LIBERO, and LIBERO-X through Python adapters.
+- Remote protocol: binary Protobuf over WebSocket, package `wam.rpc.v06`.
+- Not included: gRPC, ROS2, dynamic plugins, multi-GPU/offload, or automatic
+  model/tokenizer downloads.
+
+Large checkpoints, language encoders, simulator checkouts, frozen numerical
+fixtures, videos, and rollout results are external assets. Default tests use
+contract fixtures and do not claim real-model numerical parity or simulator
+success.
+
+## Build options and gates
+
+The model entry points are independently controlled by `WAM_BUILD_GWP05` and
+`WAM_BUILD_FASTWAM`. `WAM_BUILD_SERVING` controls the C ABI and descriptor;
+`WAM_BUILD_APPS` controls inspection tools. CUDA is opt-in:
+
+```bash
+cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release \
+  -DWAM_CUDA=ON -DWAM_CUDNN=ON -DCMAKE_CUDA_ARCHITECTURES=80
+cmake --build build-cuda --parallel
+ctest --test-dir build-cuda --output-on-failure
+```
+
+External artifact and numerical gates are enabled only when their grouped
+`WAM_TEST_*` paths are explicitly configured. The exact variables and expected
+fixtures are documented in [Support Matrix](docs/support-matrix.md) and
+`tests/reference/README.md`; missing external assets are reported as skipped,
+never as passed.
+
+## License
+
+See [LICENSE](LICENSE).

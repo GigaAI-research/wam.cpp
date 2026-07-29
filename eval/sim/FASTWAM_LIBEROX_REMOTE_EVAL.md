@@ -56,7 +56,7 @@ invalid for this checkpoint.
 ## Server
 
 ```bash
-CUDA_VISIBLE_DEVICES=7 PYTHONPATH=$PWD/eval \
+CUDA_VISIBLE_DEVICES=7 PYTHONPATH=$PWD/python \
 python -u eval/sim/run_liberox_server.py \
   --library build-gate-b-serving-checkpoint-cuda/libwam_c_api.so \
   --descriptor build-gate-b-serving-checkpoint-cuda/wam.desc \

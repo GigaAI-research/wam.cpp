@@ -45,10 +45,10 @@ python scripts/convert/convert_gwp05.py \
   --weight-policy mot-vae-bf16-qkv \
   --out /testessfs10/users/yejun.zeng/share/gwp/models/robotwin/gwp05-robotwin-14d-zscore-mot-vae-bf16-qkv.gguf
 
-python scripts/inspect/inspect_gguf.py \
-  /testessfs10/users/yejun.zeng/share/gwp/models/robotwin/gwp05-robotwin-14d-zscore-mot-vae-bf16-qkv.gguf \
-  --expect-policy mot-vae-bf16-qkv-v1 \
-  --policy-spec profiles/gwp05_robotwin_14d_zscore.json
+build/wam-inspect \
+  /testessfs10/users/yejun.zeng/share/gwp/models/robotwin/gwp05-robotwin-14d-zscore-mot-vae-bf16-qkv.gguf
+build/wam-validate \
+  /testessfs10/users/yejun.zeng/share/gwp/models/robotwin/gwp05-robotwin-14d-zscore-mot-vae-bf16-qkv.gguf
 ```
 
 ## 1. Capture The Independent PyTorch Oracle
@@ -60,7 +60,7 @@ tokens; the inference server's generic 512-token default is not the checkpoint
 contract.
 
 ```bash
-cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5
+cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6
 
 nvidia-smi -L
 python tests/reference/capture_gwp05_robotwin_pytorch.py \

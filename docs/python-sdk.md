@@ -32,6 +32,11 @@ instead contain `token_ids` plus `attention_mask`, or `embedding` plus
 The remote `wam.Client` uses `wam.rpc.v06`. Remote failures raise `RemoteError`
 with stable RPC code, field-level details, and a fatal flag.
 
+Bundle layout and resource precedence are specified in
+[Artifact Bundle](artifact-bundle.md). Server startup, handshake, recovery, and
+production boundaries are documented in [Serving](serving.md). Runnable local
+and remote functions are under `examples/python/`.
+
 ## C ABI ownership
 
 Call every `wam_c_*_init` initializer before passing an input structure. Input

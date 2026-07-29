@@ -8,7 +8,7 @@ Build the CUDA runtime and descriptor inside `gwp_zyj`:
 
 ```bash
 docker exec -it gwp_zyj bash
-cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5
+cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6
 cmake -S . -B build-serving -G Ninja \
   -DWAM_CUDA=ON -DWAM_CUDNN=ON -DCMAKE_CUDA_ARCHITECTURES=80 \
   -DWAM_BUILD_SERVING=ON
@@ -38,9 +38,9 @@ Then run one `beat_block_hammer` episode in `robotwin_zyj`, replacing
 ```bash
 docker exec -it robotwin_zyj bash
 /root/miniconda3/bin/conda run -n RoboTwin python \
-  /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_robotwin_client.py \
+  /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_robotwin_client.py \
   --robotwin-root /testessfs10/users/yejun.zeng/codes/RoboTwin \
-  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/build-serving/wam.desc \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-serving/wam.desc \
   --task beat_block_hammer --episodes 1 \
   --host SERVER_HOST --port 18060 --execute-steps 48
 ```
@@ -73,9 +73,9 @@ success rates. With the server running, execute:
 
 ```bash
 /root/miniconda3/bin/conda run --no-capture-output -n RoboTwin python -u \
-  /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/eval/sim/run_robotwin_client.py \
+  /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_robotwin_client.py \
   --robotwin-root /testessfs10/users/yejun.zeng/codes/RoboTwin \
-  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.5/build-serving/wam.desc \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-serving/wam.desc \
   --task beat_block_hammer --episodes 100 \
   --host SERVER_HOST --port 18060 --execute-steps 48 \
   --metrics-output /testessfs10/users/yejun.zeng/codes/RoboTwin/logs/single_task_eval/eval_result/beat_block_hammer/wam05/demo_clean/none/metrics/wam05_seed0_test100.json

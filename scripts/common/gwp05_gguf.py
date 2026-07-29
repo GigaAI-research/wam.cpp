@@ -16,11 +16,6 @@ from common.policy_spec import (
 
 ARCH = "gwp05"
 CONVERTER_REVISION = "wam-0.6-gwp05-policy-spec-v3"
-SUPPORTED_CONVERTER_REVISIONS = {
-    "gwp05-native-bf16-v1",
-    "wam-0.5-gwp05-policy-spec-v2",
-    CONVERTER_REVISION,
-}
 DTYPE_BYTES = {"F32": 4, "BF16": 2}
 STATISTIC_NAMES = (
     "state_mean", "state_std", "state_q01", "state_q99",

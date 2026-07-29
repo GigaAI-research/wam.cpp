@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace wam::apps {
 
@@ -47,6 +48,16 @@ inline std::string json_string(const std::string & value) {
     }
     output.push_back('"');
     return output;
+}
+
+inline void write_json_strings(std::ostream & stream,
+                               const std::vector<std::string> & values) {
+    stream << '[';
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) stream << ',';
+        stream << json_string(values[index]);
+    }
+    stream << ']';
 }
 
 inline int report_error(const Error & error) {

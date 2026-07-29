@@ -10,10 +10,12 @@ import time
 
 import numpy as np
 
-from common.rpc import RemoteError, RpcClient, decode_tensor, encode_tensor
-from common.server import EnvironmentContract, WamServer, check_environment
-from common.language import PreparedLanguage
 from wam import ErrorCode, Prediction, SessionConfig, WamError
+from wam.adapters import EnvironmentContract, check_environment
+from wam.language import PreparedLanguage
+from wam.remote import (Client as RpcClient, RemoteError, decode_tensor,
+                        encode_tensor)
+from wam.serving import ServiceCore, WebSocketTransport
 
 
 def metadata(concurrent=True):
@@ -137,12 +139,13 @@ def contract():
 async def running_server(descriptor, external=False, concurrent=True):
     from websockets.asyncio.server import serve
     model = FakeModel(external, concurrent)
-    app = WamServer(model, FakeLanguageProvider(external), descriptor,
-                    contract(), "127.0.0.1", 0)
+    service = ServiceCore(model, FakeLanguageProvider(external), descriptor,
+                          contract())
+    app = WebSocketTransport(service, "127.0.0.1", 0)
     async with serve(app.handler, "127.0.0.1", 0, compression=None) as server:
         yield (model,
                f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}",
-               app.types, app.service)
+               service.types, service)
 
 
 async def exchange(socket, message, response_type):

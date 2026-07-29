@@ -11,10 +11,9 @@ import types
 
 import numpy as np
 
-sys.path[:0] = [str(Path(__file__).resolve().parent),
-                str(Path(__file__).resolve().parents[1])]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common.rpc import RpcClient
+from wam.remote import Client as RpcClient
 from wam.adapters.libero import ACTION_FIELDS, STATE_FIELDS
 from wam.adapters.liberox import LiberoXAdapter
 from wam.eval import ActionChunkExecutor

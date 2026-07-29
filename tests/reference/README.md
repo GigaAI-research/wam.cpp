@@ -14,25 +14,25 @@ treated as one execution.
 Configure the external gate with explicit local paths:
 
 ```bash
-cmake -S . -B build-slice4a \
+cmake -S . -B build-external-gwp05 \
   -DWAM_TEST_GWP05_REAL_GGUF=/models/gwp05-f32.gguf \
   -DWAM_TEST_GWP05_REPLAY_ROOT=/private/replay/gwp05 \
   -DWAM_TEST_GWP05_MATERIALIZED_INPUT_DIR=/private/replay/gwp05-ppm-f32 \
   -DWAM_TEST_GWP05_STAGE_ROOT=/private/stages/gwp05-f32-complete \
   -DWAM_TEST_GWP05_CACHE_STAGE_ROOT=/private/stages/gwp05-f32-cache \
   -DWAM_TEST_GWP05_DONOR_EXECUTABLE=/private/bin/gwp-bench
-cmake --build build-slice4a
-ctest --test-dir build-slice4a --output-on-failure \
+cmake --build build-external-gwp05
+ctest --test-dir build-external-gwp05 --output-on-failure \
   -R 'wam_gwp05_(real_artifact|donor_reference|engine_reference)'
 ```
 
 `WAM_TEST_GWP05_MATERIALIZED_INPUT_DIR` contains decoded P6 PPM images plus
 `state.f32`, `noise.f32`, and `t5_embedding.f32`. It is separate from the
 distribution-blocked replay manifest so the engine test does not add a PNG
-decoder or copy private payloads into this repository. The Slice 4B engine gate
+decoder or copy private payloads into this repository. The private-engine gate
 compares the complete F32 CPU path through normalized `[48,32]` model-space
 action and verifies reset/repeat determinism with explicit action noise. The
-Slice 5 portion reloads the same artifact through the public API, compares the
+public API portion reloads the same artifact, compares the
 decoded `[48,14]` action with the donor, verifies two seeded sessions share one
 weight residency while keeping RNG/cache state isolated, and checks reset plus
 model-handle-before-session lifetime behavior.

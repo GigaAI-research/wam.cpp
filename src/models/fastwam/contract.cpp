@@ -256,7 +256,7 @@ std::shared_ptr<const FastWamContract> load_contract(
     }
 
     if (geometry.variant != "uncond_action_only") {
-        incompatible("FastWAM variant is outside the 0.5 public scope",
+        incompatible("FastWAM variant is outside the supported public scope",
                      "fastwam.variant", geometry.variant);
     }
     if (geometry.action_shift <= 0.0F || geometry.video_shift <= 0.0F ||

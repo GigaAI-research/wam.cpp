@@ -7,7 +7,12 @@ name = "wam"
 version = "0.6.0"
 description = "Python SDK for local and remote wam.cpp policy inference"
 requires-python = ">=3.9"
-dependencies = ["numpy>=1.23", "protobuf>=4", "websockets>=12"]
+dependencies = [
+    "numpy>=1.23,<3",
+    "Pillow>=10,<13",
+    "protobuf>=4,<8",
+    "websockets>=14,<16",
+]
 
 [project.optional-dependencies]
 language = ["transformers>=4"]

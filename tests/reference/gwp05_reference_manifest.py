@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or verify the path-free Slice 4A GWP05 donor manifest."""
+"""Create or verify the path-free GWP05 donor parity manifest."""
 
 from __future__ import annotations
 
@@ -264,7 +264,7 @@ def main() -> int:
     expected = json.loads(args.manifest.read_text(encoding="utf-8"))
     if actual != expected:
         raise SystemExit("donor reference differs from the frozen manifest")
-    print("GWP05 Slice 4A donor reference: PASS")
+    print("GWP05 donor parity reference: PASS")
     return 0
 
 

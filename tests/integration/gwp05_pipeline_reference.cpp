@@ -262,7 +262,7 @@ int main(int argc, char ** argv) {
                            public_info.resident_device_bytes > 0 &&
                            public_info.compute_precision ==
                                wam::ComputePrecision::f32,
-                       "public GWP model did not expose the Slice 5 runtime");
+                       "public GWP05 model did not expose the compute runtime");
 
     wam::SessionConfig public_session_options;
     public_session_options.random_seed = 20260713;

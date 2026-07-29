@@ -13,8 +13,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.rpc import RpcClient
+from wam.remote import Client as RpcClient
 from wam.adapters.libero import (
     ACTION_FIELDS, STATE_FIELDS, LiberoAdapter)
 from wam.eval import (ActionChunkExecutor, ResultWriter, VideoWriter,

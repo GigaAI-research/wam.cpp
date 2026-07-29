@@ -13,10 +13,6 @@ from common.policy_spec import POLICY_PROFILE_FORMAT, POLICY_SCHEMA_VERSION
 ARCH = "fastwam"
 CONVERSION_POLICY = "fastwam-bf16-policy-v2"
 CONVERTER_REVISION = "wam-0.6-fastwam-policy-spec-v3"
-SUPPORTED_CONVERTER_REVISIONS = {
-    "wam-0.5-fastwam-policy-spec-v2",
-    CONVERTER_REVISION,
-}
 EXPECTED_COMPONENT_COUNTS = {
     "video": 825,
     "action": 824,

@@ -17,7 +17,10 @@ execute_process(
     ERROR_VARIABLE inspect_error)
 if(NOT inspect_result EQUAL 0 OR
    NOT inspect_output MATCHES "\"valid\":true" OR
-   NOT inspect_output MATCHES "\"schema_version\":3")
+   NOT inspect_output MATCHES "\"schema_version\":3" OR
+   NOT inspect_output MATCHES "\"image_roles\":\\[" OR
+   NOT inspect_output MATCHES "\"state_fields\":\\[" OR
+   NOT inspect_output MATCHES "\"action_fields\":\\[")
     message(FATAL_ERROR
         "direct artifact inspection failed: ${inspect_error}${inspect_output}")
 endif()

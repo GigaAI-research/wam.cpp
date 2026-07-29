@@ -18,13 +18,13 @@ python scripts/convert/convert_fastwam.py \
 ```
 
 The audited v3 conversion contains 1741 tensors and is 12,150,404,960 bytes. Run
-`scripts/inspect/inspect_fastwam.py` and the `wam_fastwam_robotwin_artifact`
-CTest before serving it.
+`wam-inspect`, `wam-validate`, and the `wam_fastwam_robotwin_artifact` CTest
+before serving it.
 
 ## Server
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 PYTHONPATH=$PWD/eval \
+CUDA_VISIBLE_DEVICES=6 PYTHONPATH=$PWD/python \
 python -u eval/sim/run_robotwin_server.py \
   --library build-gate-b-serving-checkpoint-cuda/libwam_c_api.so \
   --descriptor build-gate-b-serving-checkpoint-cuda/wam.desc \

@@ -20,19 +20,19 @@ option(WAM_BUILD_APPS "Build artifact inspection and validation tools" ON)
 option(WAM_CUDA "Build the pinned ggml CUDA backend" OFF)
 option(WAM_CUDNN "Enable the validated GWP05 BF16 VAE path" OFF)
 set(WAM_TEST_GWP05_REAL_GGUF "" CACHE FILEPATH
-    "Optional real GWP05 GGUF used by the Slice 4A artifact gate")
+    "Optional real GWP05 GGUF used by the external artifact gate")
 set(WAM_TEST_GWP05_ROBOTWIN_GGUF "" CACHE FILEPATH
     "Optional formal 14D RoboTwin PolicySpec GGUF used by Gate A")
 set(WAM_TEST_GWP05_REPLAY_ROOT "" CACHE PATH
-    "Optional external GWP05 replay root used by the Slice 4A donor gate")
+    "Optional external GWP05 replay root used by the donor parity gate")
 set(WAM_TEST_GWP05_STAGE_ROOT "" CACHE PATH
-    "Optional external GWP05 complete-graph stage root used by the Slice 4A donor gate")
+    "Optional external GWP05 complete-graph stage root used by the donor parity gate")
 set(WAM_TEST_GWP05_CACHE_STAGE_ROOT "" CACHE PATH
-    "Optional external GWP05 prefix-cache stage root used by the Slice 4A donor gate")
+    "Optional external GWP05 prefix-cache stage root used by the donor parity gate")
 set(WAM_TEST_GWP05_DONOR_EXECUTABLE "" CACHE FILEPATH
-    "Optional GWP05 donor executable used to identify the Slice 4A oracle")
+    "Optional GWP05 donor executable used to identify the frozen oracle")
 set(WAM_TEST_GWP05_MATERIALIZED_INPUT_DIR "" CACHE PATH
-    "Optional decoded PPM/F32 replay directory used by the Slice 4B engine gate")
+    "Optional decoded PPM/F32 replay directory used by the engine parity gate")
 set(WAM_TEST_GWP05_ROBOTWIN_INPUT_DIR "" CACHE PATH
     "Optional frozen 14D RoboTwin observation used by Gate A")
 set(WAM_TEST_GWP05_ROBOTWIN_REFERENCE_DIR "" CACHE PATH

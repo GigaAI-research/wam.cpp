@@ -14,8 +14,7 @@ import time
 import numpy as np
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.rpc import RpcClient
+from wam.remote import Client as RpcClient
 from wam.adapters.robotwin import ROLE_MAP, RoboTwinAdapter, rgb_u8
 from wam.eval import (ActionChunkExecutor, ResultWriter,
                       distribution as _distribution)

@@ -15,10 +15,7 @@ def run():
     assert "artifact_sha256" not in text
     assert "architecture ==" not in text and "architecture in (" not in text
 
-    for name in ("native.py", "language.py", "rpc.py", "server.py"):
-        value = (root / "eval/common" / name).read_text()
-        assert "from wam" in value
-        assert len(value.splitlines()) < 70
+    assert not any((root / "eval/common").glob("*.py"))
 
     for name in ("run_libero_client.py", "run_liberox_client.py"):
         value = (root / "eval/sim" / name).read_text()
@@ -33,6 +30,7 @@ def run():
         value = (root / "eval/sim" / name).read_text()
         assert "EnvironmentContract(" not in value
         assert "from wam.adapters" in value
+        assert "from wam.serving" in value
 
 
 if __name__ == "__main__":
