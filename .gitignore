@@ -75,3 +75,13 @@ MUJOCO_LOG.TXT
 .vscode/
 *~
 *.swp
+# Local design, migration, and validation records are intentionally not part of
+# the published source branch.
+/ARCHITECTURE.md
+/TODO.md
+/docs/
+/eval/sim/*.md
+/tests/adapter/README.md
+/tests/parity/README.md
+/tests/reference/*.md
+/tests/python/test_release_docs.py

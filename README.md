@@ -78,10 +78,9 @@ with wam.Client("127.0.0.1", 18060, "build/wam.desc", "robotwin") as client:
     action, stats = client.predict(images, state, "pick up the cup")
 ```
 
-The complete local API and ownership rules are in
-[Python SDK](docs/python-sdk.md). See [Artifact Bundle](docs/artifact-bundle.md)
-for deployment layout and [Serving](docs/serving.md) for protocol and process
-details.
+The public Python types expose context managers for deterministic resource
+release. Artifact bundles use a manifest beside the GGUF and optional local
+tokenizer or language-encoder resources; the runtime never downloads them.
 
 ## C++ consumption
 
@@ -129,17 +128,13 @@ apps / serving / adapters / eval
 Public headers never expose GGML or model-private types. A model module contains
 its contract, resources/session state, readable pipeline, and mathematical
 networks. An environment adapter contains only observation and controller
-semantics. Start with the relevant guide:
-
-- [Architecture](ARCHITECTURE.md)
-- [Adding a Model](docs/adding-a-model.md)
-- [Adding an Environment](docs/adding-an-environment.md)
-- [Evaluation](docs/evaluation.md)
+semantics. New models register one architecture descriptor and keep network
+math below their model-local pipeline; new environments depend only on the
+public API and Python adapter contract.
 
 ## Supported scope
 
-The authoritative model/environment readiness, benchmark evidence, and known
-limitations are in [Support Matrix](docs/support-matrix.md). In summary:
+The supported 0.6 scope is:
 
 - Built-in architectures: GWP05 and FastWAM.
 - Backends: CUDA for prediction; CPU metadata mode for inspection/validation.
@@ -167,10 +162,9 @@ ctest --test-dir build-cuda --output-on-failure
 ```
 
 External artifact and numerical gates are enabled only when their grouped
-`WAM_TEST_*` paths are explicitly configured. The exact variables and expected
-fixtures are documented in [Support Matrix](docs/support-matrix.md) and
-`tests/reference/README.md`; missing external assets are reported as skipped,
-never as passed.
+`WAM_TEST_*` paths are explicitly configured. Their CMake cache descriptions
+define the required asset groups; missing external assets are reported as
+skipped, never as passed.
 
 ## License
 

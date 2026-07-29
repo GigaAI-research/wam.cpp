@@ -15,6 +15,8 @@ jobs:
   build-test-install:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -33,6 +35,6 @@ jobs:
           -DWAM_BUILD_TESTS=ON
           -DWAM_CUDA=OFF
       - name: Build
-        run: cmake --build build --parallel 2
+        run: cmake --build build --parallel 1
       - name: Test
         run: ctest --test-dir build --output-on-failure

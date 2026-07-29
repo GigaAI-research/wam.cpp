@@ -142,12 +142,6 @@ add_test(NAME wam_phase8_source_boundaries
         ${CMAKE_CURRENT_SOURCE_DIR}/python/test_phase8_boundaries.py)
 set_tests_properties(wam_phase8_source_boundaries PROPERTIES
     LABELS "python;contract;boundary")
-add_test(NAME wam_release_docs
-    COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/python/test_release_docs.py)
-set_tests_properties(wam_release_docs PROPERTIES
-    LABELS "contract;docs;release")
-
 add_library(wam_cpp_predict_example OBJECT
     ${PROJECT_SOURCE_DIR}/examples/cpp/predict.cpp)
 target_link_libraries(wam_cpp_predict_example PRIVATE wam::core)
