@@ -9,6 +9,11 @@
 
 namespace wam::internal::policy {
 
+enum class ImageResamplePrecision {
+    u8_intermediate,
+    f32_intermediate,
+};
+
 struct CpuImage {
     std::vector<float> pixels;
     std::uint32_t width = 0;
@@ -23,7 +28,9 @@ std::vector<std::size_t> resolve_image_order(const std::vector<ImageView> & imag
                                              const ImageSpec & spec);
 CpuImage transform_image_reference(const ImageView & image,
                                    const ImageTransformSpec & transform,
-                                   const ImageSpec & spec);
+                                   const ImageSpec & spec,
+                                   ImageResamplePrecision precision =
+                                       ImageResamplePrecision::u8_intermediate);
 CpuImage compose_canvas_reference(const std::vector<CpuImage> & images,
                                   const ImageSpec & spec);
 

@@ -3,7 +3,7 @@
 #include "models/gwp05/state.h"
 #include "models/gwp05/semantics.h"
 
-#include "models/common/scheduler.h"
+#include "models/gwp05/scheduler.h"
 
 #include <initializer_list>
 #include <string>

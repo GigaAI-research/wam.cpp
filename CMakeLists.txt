@@ -136,7 +136,7 @@ target_link_libraries(wam_runtime_base PRIVATE wam_policy)
 set(wam_model_objects "")
 if(WAM_BUILD_GWP05)
     add_library(wam_model_gwp05 OBJECT
-        src/models/common/scheduler.cpp
+        src/models/gwp05/scheduler.cpp
         src/models/gwp05/contract.cpp
         src/models/gwp05/inputs.cpp
         src/models/gwp05/module.cpp

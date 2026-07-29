@@ -126,6 +126,14 @@ int main() {
                 near(stretched.pixels[1], 128.0F / 255.0F) &&
                 near(stretched.pixels[2], 128.0F / 255.0F),
             "stretch antialias reference changed");
+    const CpuImage stretched_f32 = transform_image_reference(
+        image("stretch", stretch_source, 2, 1), stretch_transform,
+        crop_spec, ImageResamplePrecision::f32_intermediate);
+    require(stretched_f32.pixels.size() == 3 &&
+                near(stretched_f32.pixels[0], 0.5F) &&
+                near(stretched_f32.pixels[1], 0.5F) &&
+                near(stretched_f32.pixels[2], 0.5F),
+            "F32-intermediate resize precision changed");
 
     const std::vector<std::uint8_t> pil_source = {
         13, 50, 87, 124, 161, 198, 235, 16, 53, 90, 127, 164,

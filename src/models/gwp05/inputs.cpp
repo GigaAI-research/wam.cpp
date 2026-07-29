@@ -195,8 +195,13 @@ PreparedInputs prepare_inputs(
     }
 
     PreparedInputs prepared;
+    policy::ObservationProcessorOptions processor_options;
+    if (artifact.legacy_policy_spec) {
+        processor_options.image_resample_precision =
+            policy::ImageResamplePrecision::f32_intermediate;
+    }
     prepared.observation = policy::prepare_observation_reference(
-        inputs, policy_spec, session_rng);
+        inputs, policy_spec, session_rng, processor_options);
 
     prepared.language_mode = language_mode;
     prepare_language(inputs, artifact, policy_spec, language_mode,

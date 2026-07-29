@@ -1,11 +1,11 @@
-#include "models/common/scheduler.h"
+#include "models/gwp05/scheduler.h"
 
 #include "wam/error.h"
 
 #include <cmath>
 #include <string>
 
-namespace wam::internal {
+namespace wam::internal::gwp05 {
 namespace {
 
 [[noreturn]] void invalid(const std::string & message,
@@ -81,4 +81,4 @@ void flow_match_euler_step(std::vector<float> & action,
     }
 }
 
-} // namespace wam::internal
+} // namespace wam::internal::gwp05

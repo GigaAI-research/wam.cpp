@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace wam::internal {
+namespace wam::internal::gwp05 {
 
 struct FlowMatchEulerSchedule {
     std::vector<float> timesteps;
@@ -18,4 +18,4 @@ void flow_match_euler_step(std::vector<float> & action,
                            const std::vector<float> & velocity,
                            float delta_sigma);
 
-} // namespace wam::internal
+} // namespace wam::internal::gwp05

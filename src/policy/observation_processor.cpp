@@ -7,7 +7,8 @@ namespace wam::internal::policy {
 
 PreparedObservation prepare_observation_reference(
     const Observation & inputs, const PolicySpec & policy_spec,
-    std::mt19937 & session_rng) {
+    std::mt19937 & session_rng,
+    const ObservationProcessorOptions & options) {
     PreparedObservation prepared;
     const std::vector<std::size_t> order = resolve_image_order(
         inputs.images, policy_spec.images);
@@ -16,7 +17,7 @@ PreparedObservation prepare_observation_reference(
     for (std::size_t index = 0; index < order.size(); ++index) {
         transformed.push_back(transform_image_reference(
             inputs.images[order[index]], policy_spec.images.views[index],
-            policy_spec.images));
+            policy_spec.images, options.image_resample_precision));
     }
     prepared.composite_image = compose_canvas_reference(
         transformed, policy_spec.images);

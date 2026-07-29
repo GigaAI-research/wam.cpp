@@ -301,8 +301,12 @@ int main(int argc, char ** argv) {
         public_max = std::max(public_max, difference);
     }
     public_mean /= first_values.size();
-    wam::test::require(public_mean <= 1.0e-3 && public_max <= 1.0e-2,
-                       "public GWP action differs from donor recovery");
+    if (public_mean > 1.0e-3 || public_max > 1.0e-2) {
+        throw std::runtime_error(
+            "public GWP action differs from donor recovery: mean_abs=" +
+            std::to_string(public_mean) + " max_abs=" +
+            std::to_string(public_max));
+    }
 
     wam::Observation random_inputs = inputs;
     random_inputs.action_noise = {};

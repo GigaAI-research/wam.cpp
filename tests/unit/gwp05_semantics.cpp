@@ -4,7 +4,7 @@
 #include "support/test_utils.h"
 
 #include "artifact/gguf_reader.h"
-#include "models/common/scheduler.h"
+#include "models/gwp05/scheduler.h"
 #include "models/gwp05/semantics.h"
 #include "policy/policy_spec.h"
 
@@ -70,14 +70,15 @@ int main() {
         },
         wam::ErrorCode::invalid_argument, "noncontiguous prompt mask");
 
-    const wam::internal::FlowMatchEulerSchedule schedule =
-        wam::internal::make_flow_match_euler_schedule(10, 5.0F);
+    const wam::internal::gwp05::FlowMatchEulerSchedule schedule =
+        wam::internal::gwp05::make_flow_match_euler_schedule(10, 5.0F);
     require(schedule.steps() == 10 && schedule.sigmas.size() == 11 &&
                 std::fabs(schedule.timesteps[6] - 717.31744F) < 1.0e-4F &&
                 schedule.delta_sigma(0) < 0.0F && schedule.sigmas.back() == 0.0F,
             "flow-match schedule changed");
     std::vector<float> action = {1.0F, -2.0F};
-    wam::internal::flow_match_euler_step(action, {4.0F, 0.5F}, -0.25F);
+    wam::internal::gwp05::flow_match_euler_step(
+        action, {4.0F, 0.5F}, -0.25F);
     require(action == std::vector<float>({0.0F, -2.125F}),
             "flow-match Euler update changed");
 

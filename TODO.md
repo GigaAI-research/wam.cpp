@@ -557,10 +557,11 @@ SessionConfig 包含：
 - 已增加显式 noise 不消耗 Session RNG、相同 seed 生成相同 noise、Session cache 隔离、reset 清理 cache/counter 以及旧边界不可恢复的默认测试；既有外部 reference gate 已迁移为 Pipeline/SessionState 接口，并继续覆盖 UMT5、VAE、MoT、denoise、cache、reset 和多 Session 路径。
 - 本地验证结果：默认 CPU 36/36、关闭 GWP05/FastWAM/Serving 的 Runtime-only 25/25、CUDA 12.4 + cuDNN + `sm_80` 36/36；安装消费和源码边界测试包含在上述矩阵中。
 
-待完成的外部门禁：
+外部门禁完成状态（2026-07-29）：
 
-- 当前构建未配置 `WAM_TEST_GWP05_REAL_GGUF`、`WAM_TEST_GWP05_MATERIALIZED_INPUT_DIR`、`WAM_TEST_GWP05_STAGE_ROOT`、RoboTwin GGUF/输入/reference 目录及 donor replay 路径，因此真实权重的分阶段 parity、最终 action parity 和 simulator smoke 尚未执行。
-- Phase 5 的结构迁移与默认验收已经完成；在上述真实资产门禁全部通过前，不把 GWP05 数值迁移和 RoboTwin 验收标记为最终完成，也不进入会改变 GWP05 数学的优化。
+- 已在独立 Release gate 构建中显式配置 legacy F32 oracle、materialized input、分阶段 reference、cache reference、donor replay，以及 schema-v3 RoboTwin GGUF/input/reference。Artifact、donor reference、legacy F32 完整 Pipeline/公开 Session parity 和 A800 BF16 RoboTwin parity 全部通过。
+- legacy F32 gate 同时覆盖 UMT5、VAE、MoT、denoise、cache、公开 action recovery、两个 Session、RNG 隔离及 reset/repeat；耗时较长的 F32 oracle 在 CPU 上执行，CUDA BF16 gate 在 A800 `sm_80` 上执行。
+- 当前 0.6 C API + WebSocket + Adapter 纵向链路在 RoboTwin `beat_block_hammer` 固定 seed `100000` 上通过 `1/1`，第 107 个环境 step 成功。Phase 5 的结构、数值和 simulator 验收已完成。
 
 ### Phase 6：迁移 FastWAM
 
@@ -584,10 +585,11 @@ SessionConfig 包含：
 - 已增加纯合成测试，覆盖 proprio projection、错误 backend/precision、SessionState 隔离/reset、显式 noise 不消耗 RNG，以及相同 seed 生成相同 noise；既有 LIBERO frozen replay gate 继续覆盖公开 Action parity、Session RNG 推进、peer Session 和 reset 恢复。
 - 本地验证结果：默认 CPU 37/37、关闭 GWP05/FastWAM/Serving 的 Runtime-only 25/25、CUDA 12.4 + cuDNN + `sm_80` 37/37；安装消费和源码边界测试包含在上述矩阵中。
 
-待完成的外部门禁：
+外部门禁完成状态（2026-07-29）：
 
-- 当前构建未配置 `WAM_TEST_FASTWAM_LIBERO_GGUF`、`WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR` 和 `WAM_TEST_FASTWAM_ROBOTWIN_GGUF`，因此真实 LIBERO/RoboTwin Artifact gate、CUDA frozen replay parity 和 simulator smoke 尚未执行。
-- Phase 6 的结构迁移与默认验收已经完成；在真实资产 parity 和至少一个 simulator smoke 通过前，不把 FastWAM 数值迁移标记为最终完成，也不进入会改变 FastWAM 数学的优化。
+- 已在独立 Release gate 构建中显式配置 LIBERO GGUF/frozen replay 和 RoboTwin GGUF。LIBERO/RoboTwin Artifact gate 与 A800 BF16 LIBERO public-Session frozen replay parity 全部通过。
+- 当前 0.6 C API + WebSocket + Adapter 纵向链路在 LIBERO `libero_spatial` task 0、init-state 0、seed 0 上通过；episode 在 70 个 control step、7 次 RPC request 后成功。
+- Phase 6 的结构、数值和至少一个真实 simulator smoke 验收已完成；RoboTwin/LIBERO-X 的已有审计结论仍按支持矩阵解释，不由本次 LIBERO smoke 扩大支持范围。
 
 ### Phase 7：C ABI、Python SDK 和用户工具
 
@@ -608,10 +610,10 @@ Phase 7 实施结果：
 - 已提供可编译的 C++ 最小示例、Python 原始 instruction 示例、`docs/python-sdk.md` 和 wheel console script `wam-predict`。CLI 从规范 NPZ 读取 `state`、`image.<role>` 与 raw/prepared language input，输出 JSON 或 NPY action chunk。
 - 本地验证结果：默认 CPU 41/41、关闭 GWP05/FastWAM/Serving 的 Runtime-only 27/27、CUDA 12.4 + cuDNN + `sm_80` 41/41。wheel 测试在临时源码副本中完成构建、隔离 venv 安装、正式包导入和 `wam-predict --help`，不会向源码树写入 build/egg-info 中间文件。
 
-Phase 7 尚未执行的外部门禁：
+Phase 7 外部门禁状态：
 
-- 当前构建仍未配置真实 GWP05/FastWAM GGUF、冻结 observation/noise 与独立 reference action，因此不能把“相同输入/seed 的 C++ direct、C ABI 与 Python local 数值一致”标记为已验证。Python local 直接调用 C ABI v4，结构、错误和生命周期路径已覆盖；真实数值 parity 必须复用 Phase 5/6 的外部 Gate A/Gate B 资产后再完成。
-- 远程 `Client` 在 Phase 7 正式化了用户 API 和资源生命周期，但仍封装现有 `wam.rpc.v05` wire protocol。`wam.rpc.v06`、transport-neutral service core 和 C++/Python local/WebSocket remote 的真实数值一致性属于 Phase 8，不能在本阶段提前宣称完成。
+- 2026-07-29 已复用 Phase 5/6 的真实 GGUF、冻结 observation/noise 和独立 reference action，GWP05/FastWAM public-Session 数值门禁均通过。Python local 直接调用同一 C ABI v4/C++ Session；结构、错误、生命周期和安装后动态库消费路径由默认测试覆盖。
+- Phase 8 已完成 `wam.rpc.v06` 和 transport-neutral ServiceCore，并由真实 GWP05/RoboTwin、FastWAM/LIBERO smoke 覆盖正式远程 Client 到 C++ Session 的纵向链路。
 
 ### Phase 8：Serving、Adapter 和 Eval
 
@@ -635,10 +637,10 @@ Phase 8 实施结果：
 - 默认测试覆盖 malformed Protobuf/text frame、错误 request id、错误协议/环境、握手、recoverable/fatal error、reset、close、Session 释放、正式 Client error mapping、core/WebSocket Prediction 一致性，以及 `concurrent_sessions=false` 时跨连接推理串行化。RoboTwin、LIBERO 和 LIBERO-X 以固定 seed 合成 observation/action 完成 adapter -> ActionChunkExecutor -> step smoke。
 - 本地验证结果：默认 CPU 43/43、关闭 GWP05/FastWAM/Serving 的 Runtime-only 29/29、CUDA 12.4 + cuDNN + `sm_80` 43/43；wheel 隔离安装同时验证 `wam-predict` 与 `wam-serve` console script。
 
-Phase 8 尚未执行的外部门禁：
+Phase 8 外部门禁状态：
 
-- 当前工作区没有真实 RoboTwin、LIBERO、LIBERO-X simulator checkout、GGUF 和固定 episode 资产，因此三个环境的真实 simulator smoke 尚未执行；默认门禁只证明固定 seed 合成 adapter/eval 流程，不将其表述为 simulator 成功率或模型数值验证。
-- 真实 GWP05/FastWAM 的 C++ direct、Python local 与 WebSocket remote Prediction parity 仍需 Phase 5/6 的外部 GGUF、observation/noise 和 reference action。默认测试使用同一 deterministic fake Session 验证 core 与正式 Client 序列化路径输出完全一致。
+- 2026-07-29 已使用真实 GGUF 和 simulator checkout 重跑 GWP05/RoboTwin 与 FastWAM/LIBERO 各一个固定 episode，均成功。两条路径均经过 Python remote Client、Protobuf/WebSocket、正式 ServiceCore、C ABI v4、C++ Session、Adapter 和 ActionChunkExecutor，证明 0.6 远程纵向链路可用；单 episode smoke 不表述为新的成功率基准。
+- Phase 5/6 的真实 public-Session reference gates 验证本地 Prediction 数值，默认 deterministic Session 测试验证 ServiceCore 与正式 Client 序列化结果一致，真实 simulator smoke 验证 C ABI/WebSocket 的完整运行路径。尚未增加一份把同一真实 observation 同时送入四个入口并逐元素比较的独立冗余测试；0.6 的四个入口共享同一 C++ Session 实现，不维护第二套模型数学。
 - RoboTwin 和 LIBERO-X 上游 evaluator 源码未包含在当前工作区，现有版本没有可审计的 policy factory 参数；外部 runner 仍需在启动边界注入上游 `WebsocketClientPolicy/eval_func`。环境转换、协议和 eval 公共逻辑已经移出该注入块，但在取得固定上游 revision 并确认正式扩展点前，不把“删除全部 monkeypatch”标记为完成。
 
 ### Phase 9：文档、打包与发布验收
@@ -662,11 +664,13 @@ Phase 9 实施结果：
 - converter 只发布 schema-v3 revision，删除 Python helper 中不再被使用的旧 converter revision 集合；schema-v2 与 legacy GWP05 读取路径仍只作为冻结迁移 oracle，不构成 0.6 artifact 兼容承诺。
 - 发布验证结果：默认 CPU 44/44、关闭 GWP05/FastWAM/Serving 的 Runtime-only 30/30、CUDA 12.4 + cuDNN + `sm_80` 44/44；Python release/boundary tests 和全部脚本语法检查通过。
 
-Phase 9 尚未执行的外部门禁：
+Phase 9 发布候选验证（2026-07-29）：
 
-- GitHub Actions workflow 已在本地等价容器矩阵验证，但只有推送到 GitHub 后才能取得 hosted runner 状态；本阶段不伪造远端 CI 成功记录。
-- 当前工作区未配置 Phase 5/6 的真实 GGUF、冻结 observation/noise/reference action 和三个 simulator checkout，因此没有重新执行真实 local/remote Prediction parity 或 simulator smoke。Phase 8 记录的外部门禁继续有效，默认合成测试不能替代它们。
-- 0.6 发布完成定义中的“GWP05 与 FastWAM 所有目标组合均通过真实数值 parity 和 simulator smoke”尚未满足；文档与打包阶段完成不等价于可以发布全部组合。
+- scheduler 遗留已从伪公共 `src/models/common/` 收回 GWP05；源码边界测试禁止恢复该目录。迁移过程中发现并修复 legacy F32 resize 中间精度和无 debug 时 MoT graph output 生命周期问题，均有回归测试。
+- 最终默认 CPU 为 44/44、Runtime-only 为 30/30、CUDA 12.4 + cuDNN + `sm_80` 为 44/44；三套矩阵在上述修复后全部重新执行。
+- 真实资产门禁共 8 项并全部通过：GWP05 real/RoboTwin Artifact、FastWAM LIBERO/RoboTwin Artifact、GWP05 donor reference、GWP05 legacy F32 Pipeline reference、GWP05 RoboTwin parity 和 FastWAM LIBERO parity。
+- GWP05/RoboTwin 与 FastWAM/LIBERO 当前 0.6 真实 simulator smoke 均通过。大型资产和 rollout 输出不提交 Git。
+- Hosted CPU CI 只能在本提交推送后确认；远端状态确认前不创建或推送 `v0.6.0` tag。
 
 ## 7. 测试体系
 

@@ -42,6 +42,10 @@ wam_assert_no_match(
 file(GLOB_RECURSE gwp05_sources
     "${WAM_SOURCE_DIR}/src/models/gwp05/*.h"
     "${WAM_SOURCE_DIR}/src/models/gwp05/*.cpp")
+if(EXISTS "${WAM_SOURCE_DIR}/src/models/common")
+    message(FATAL_ERROR
+        "legacy src/models/common directory was reintroduced")
+endif()
 if(EXISTS "${WAM_SOURCE_DIR}/src/models/gwp05/engine" OR
    EXISTS "${WAM_SOURCE_DIR}/src/models/gwp05/engine_internal.h")
     message(FATAL_ERROR

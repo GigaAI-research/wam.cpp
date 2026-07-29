@@ -701,8 +701,10 @@ bool run_mot_step(ExecutionState & model,
     graph.action_output = scheduler_step(
         ctx, model, action_input, prediction, graph.dt_input);
     ggml_set_output(graph.action_output);
+    // The host-side scheduler reads prediction after graph execution. Keep it
+    // live even when debug dumps are disabled so the allocator cannot reuse it.
+    ggml_set_output(prediction);
     if (dump_intermediates && debug_dump_enabled(model)) {
-        ggml_set_output(prediction);
         for (ggml_tensor * tensor : {action_tokens_debug, visual_tokens_debug,
                                      action_condition_debug, block0_action_debug}) {
             ggml_set_output(tensor);
@@ -711,8 +713,8 @@ bool run_mot_step(ExecutionState & model,
     graph.cgraph = ggml_new_graph_custom(ctx, 32768, false);
     ggml_cgraph * cgraph = graph.cgraph;
     ggml_build_forward_expand(cgraph, graph.action_output);
+    ggml_build_forward_expand(cgraph, prediction);
     if (dump_intermediates && debug_dump_enabled(model)) {
-        ggml_build_forward_expand(cgraph, prediction);
         for (ggml_tensor * tensor : {action_tokens_debug, visual_tokens_debug,
                                      action_condition_debug, block0_action_debug}) {
             ggml_build_forward_expand(cgraph, tensor);

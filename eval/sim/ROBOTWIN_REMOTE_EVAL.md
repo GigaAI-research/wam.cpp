@@ -13,6 +13,7 @@ cmake -S . -B build-serving -G Ninja \
   -DWAM_CUDA=ON -DWAM_CUDNN=ON -DCMAKE_CUDA_ARCHITECTURES=80 \
   -DWAM_BUILD_SERVING=ON
 cmake --build build-serving -j4
+export PYTHONPATH=$PWD/python
 ```
 
 Start the server on an unused GPU:
@@ -37,6 +38,7 @@ Then run one `beat_block_hammer` episode in `robotwin_zyj`, replacing
 
 ```bash
 docker exec -it robotwin_zyj bash
+export PYTHONPATH=/testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/python
 /root/miniconda3/bin/conda run -n RoboTwin python \
   /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_robotwin_client.py \
   --robotwin-root /testessfs10/users/yejun.zeng/codes/RoboTwin \
@@ -52,6 +54,11 @@ Python; the artifact-resident T5 and all model inference remain in C++.
 The initial 2026-07-25 smoke test used seed `100000`. The policy reached
 RoboTwin success at environment step 106 (`1/1`). This confirms the remote
 integration path only.
+
+The v0.6 release-candidate rerun on 2026-07-29 used the same seed through the
+installed C ABI v4 and `wam.rpc.v06` path. It reached success at environment
+step 107 (`1/1`). This remains an integration smoke, not a new quality
+benchmark.
 
 ## Frozen 100-episode benchmark
 

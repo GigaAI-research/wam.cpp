@@ -73,6 +73,7 @@ std::uint32_t round_ties_to_even(float value) {
 struct AxisSample {
     std::vector<std::uint32_t> indices;
     std::vector<std::int32_t> weights;
+    std::vector<float> float_weights;
 };
 
 double cubic_weight(double value) {
@@ -104,6 +105,7 @@ AxisSample build_axis_sample(std::uint32_t output_position,
         sample.indices.push_back(static_cast<std::uint32_t>(
             std::max(0, std::min(static_cast<int>(source_size) - 1, index))));
         sample.weights.push_back(coefficient_scale);
+        sample.float_weights.push_back(1.0F);
         return sample;
     }
 
@@ -136,12 +138,36 @@ AxisSample build_axis_sample(std::uint32_t output_position,
                 "invalid resize geometry");
     }
     sample.weights.reserve(weights.size());
+    sample.float_weights.reserve(weights.size());
     for (const double weight : weights) {
-        const double scaled = weight / total * coefficient_scale;
+        const double normalized = weight / total;
+        const double scaled = normalized * coefficient_scale;
         sample.weights.push_back(static_cast<std::int32_t>(
             scaled < 0.0 ? scaled - 0.5 : scaled + 0.5));
+        sample.float_weights.push_back(static_cast<float>(normalized));
     }
     return sample;
+}
+
+float resample_u8_to_f32(const std::uint8_t * values,
+                         const AxisSample & sample,
+                         std::size_t stride) {
+    float result = 0.0F;
+    for (std::size_t i = 0; i < sample.indices.size(); ++i) {
+        result += values[sample.indices[i] * stride] * (1.0F / 255.0F) *
+            sample.float_weights[i];
+    }
+    return result;
+}
+
+float resample_f32(const float * values, const AxisSample & sample,
+                   std::size_t stride) {
+    float result = 0.0F;
+    for (std::size_t i = 0; i < sample.indices.size(); ++i) {
+        result += values[sample.indices[i] * stride] *
+            sample.float_weights[i];
+    }
+    return result;
 }
 
 std::uint8_t resample_u8(const std::uint8_t * values,
@@ -244,7 +270,8 @@ std::vector<std::size_t> resolve_image_order(
 
 CpuImage transform_image_reference(const ImageView & image,
                                    const ImageTransformSpec & transform,
-                                   const ImageSpec & spec) {
+                                   const ImageSpec & spec,
+                                   ImageResamplePrecision precision) {
     validate_rgb_image(image);
     if (image.name != transform.role) {
         invalid("image role does not match transform", "images." + image.name,
@@ -276,8 +303,15 @@ CpuImage transform_image_reference(const ImageView & image,
         const float scale = std::max(
             static_cast<float>(transform.target_width) / image.width,
             static_cast<float>(transform.target_height) / image.height);
-        resized_width = round_ties_to_even(image.width * scale);
-        resized_height = round_ties_to_even(image.height * scale);
+        if (precision == ImageResamplePrecision::f32_intermediate) {
+            resized_width = static_cast<std::uint32_t>(
+                std::lround(image.width * scale));
+            resized_height = static_cast<std::uint32_t>(
+                std::lround(image.height * scale));
+        } else {
+            resized_width = round_ties_to_even(image.width * scale);
+            resized_height = round_ties_to_even(image.height * scale);
+        }
         crop_x = (resized_width - transform.target_width) / 2;
         crop_y = (resized_height - transform.target_height) / 2;
     }
@@ -301,8 +335,15 @@ CpuImage transform_image_reference(const ImageView & image,
                                      spec.resample_boundary);
     }
 
-    std::vector<std::uint8_t> horizontal(image_elements(
-        transform.target_width, image.height, 3, "images." + image.name));
+    const std::size_t horizontal_elements = image_elements(
+        transform.target_width, image.height, 3, "images." + image.name);
+    std::vector<std::uint8_t> horizontal_u8;
+    std::vector<float> horizontal_f32;
+    if (precision == ImageResamplePrecision::f32_intermediate) {
+        horizontal_f32.resize(horizontal_elements);
+    } else {
+        horizontal_u8.resize(horizontal_elements);
+    }
     std::vector<std::uint8_t> row(image.width);
     for (std::uint32_t y = 0; y < image.height; ++y) {
         for (std::uint32_t channel = 0; channel < 3; ++channel) {
@@ -311,9 +352,16 @@ CpuImage transform_image_reference(const ImageView & image,
                 row[source_x] = source_value(image, source_x, y, channel);
             }
             for (std::uint32_t x = 0; x < transform.target_width; ++x) {
-                horizontal[(static_cast<std::size_t>(y) *
-                            transform.target_width + x) * 3 + channel] =
-                    resample_u8(row.data(), x_plan[x], 1);
+                const std::size_t index =
+                    (static_cast<std::size_t>(y) *
+                     transform.target_width + x) * 3 + channel;
+                if (precision == ImageResamplePrecision::f32_intermediate) {
+                    horizontal_f32[index] =
+                        resample_u8_to_f32(row.data(), x_plan[x], 1);
+                } else {
+                    horizontal_u8[index] =
+                        resample_u8(row.data(), x_plan[x], 1);
+                }
             }
         }
     }
@@ -329,12 +377,21 @@ CpuImage transform_image_reference(const ImageView & image,
     for (std::uint32_t y = 0; y < output.height; ++y) {
         for (std::uint32_t x = 0; x < output.width; ++x) {
             for (std::uint32_t channel = 0; channel < 3; ++channel) {
-                const std::uint8_t value = resample_u8(
-                    horizontal.data() +
-                        (static_cast<std::size_t>(x) * 3 + channel),
-                    y_plan[y], static_cast<std::size_t>(output.width) * 3);
+                const std::size_t offset =
+                    static_cast<std::size_t>(x) * 3 + channel;
+                float value = 0.0F;
+                if (precision == ImageResamplePrecision::f32_intermediate) {
+                    value = resample_f32(
+                        horizontal_f32.data() + offset, y_plan[y],
+                        static_cast<std::size_t>(output.width) * 3);
+                } else {
+                    value = resample_u8(
+                        horizontal_u8.data() + offset, y_plan[y],
+                        static_cast<std::size_t>(output.width) * 3) *
+                        (1.0F / 255.0F);
+                }
                 output.pixels[image_index(output, x, y, channel)] =
-                    output_range(value * (1.0F / 255.0F), spec.pixel_range);
+                    output_range(value, spec.pixel_range);
             }
         }
     }

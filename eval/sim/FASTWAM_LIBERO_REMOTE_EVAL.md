@@ -30,10 +30,15 @@ cd /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6
 export CUDA_VISIBLE_DEVICES=4
 export PYTHONPATH=$PWD/python
 
+cmake -S . -B build-serving -G Ninja \
+  -DWAM_CUDA=ON -DWAM_CUDNN=ON -DCMAKE_CUDA_ARCHITECTURES=80 \
+  -DWAM_BUILD_SERVING=ON
+cmake --build build-serving -j4
+
 python -u eval/sim/run_libero_server.py \
-  --library build-fastwam-cuda-release/libwam_c_api.so \
-  --descriptor build-fastwam-cuda-release/wam.desc \
-  --model build-fastwam-gate-b/fastwam-libero-policy-v2.gguf \
+  --library build-serving/libwam_c_api.so \
+  --descriptor build-serving/wam.desc \
+  --model /absolute/path/to/fastwam-libero-policy-v2.gguf \
   --tokenizer /testessfs10/users/yejun.zeng/codes/FastWAM/checkpoints/Wan-AI/Wan2.1-T2V-1.3B/google/umt5-xxl \
   --text-encoder /testessfs10/users/yejun.zeng/codes/FastWAM/checkpoints/DiffSynth-Studio/Wan-Series-Converted-Safetensors/models_t5_umt5-xxl-enc-bf16.safetensors \
   --language-python-root /testessfs10/users/yejun.zeng/codes/FastWAM/src \
@@ -60,10 +65,11 @@ docker exec -it liberox bash
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate liberox
 export MUJOCO_GL=egl
+export PYTHONPATH=/testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/python
 
 python -u /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/eval/sim/run_libero_client.py \
   --libero-root /testessfs10/users/yejun.zeng/codes/vla.cpp/third_party/LIBERO \
-  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-fastwam-cuda-release/wam.desc \
+  --descriptor /testessfs10/users/yejun.zeng/codes/gwp/github/wam.cpp-0.6/build-serving/wam.desc \
   --suite libero_spatial \
   --task-id 0 \
   --episode-index 0 \
@@ -85,6 +91,10 @@ steps with 9 RPC requests. Server total latency across all requests had mean 749
 649.62 ms. The first request included 405.42 ms of UMT5 execution; subsequent requests hit the
 prompt cache. This result verifies integration only and does not replace a fixed-manifest
 multi-episode success-rate evaluation.
+
+The v0.6 release-candidate rerun on 2026-07-29 used the same task, init state,
+and seed through C ABI v4 and `wam.rpc.v06`. It succeeded in 70 control steps
+with 7 RPC requests. This also verifies integration only.
 
 ## Fixed Manifest Evaluation
 

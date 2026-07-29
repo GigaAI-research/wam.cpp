@@ -23,8 +23,8 @@ checkpoint or simulator result.
 
 | Model / environment | Artifact and parity | Simulator evidence | Release interpretation |
 | --- | --- | --- | --- |
-| GWP05 / RoboTwin | Schema-v3 GGUF and independent A800 BF16 public-Session parity passed | `beat_block_hammer` smoke 1/1; frozen 100 episodes 87/100 | Validated vertical path for the audited checkpoint |
-| FastWAM / LIBERO | Schema-v3 artifact and same-input action parity passed | Four suites, 40 tasks, 2000 episodes: donor 96.75%, wam.cpp 96.90% | Validated vertical path for the released LIBERO checkpoint |
+| GWP05 / RoboTwin | Schema-v3 GGUF and independent A800 BF16 public-Session parity passed | v0.6 `beat_block_hammer` smoke 1/1; frozen 100 episodes 87/100 | Validated vertical path for the audited checkpoint |
+| FastWAM / LIBERO | Schema-v3 artifact and same-input action parity passed | v0.6 smoke 1/1; four suites, 40 tasks, 2000 episodes: donor 96.75%, wam.cpp 96.90% | Validated vertical path for the released LIBERO checkpoint |
 | FastWAM / RoboTwin | Artifact and serving path exercised | Smoke completed without runtime failure, task result 0/1 | Integration only; not model-quality support |
 | FastWAM / LIBERO-X | Artifact and same-input action gate passed for audited fixture | Fixed manifest agrees at result level; audited checkpoint is 0/10 | Integration fixture only; checkpoint training audit blocks release |
 | GWP05 / LIBERO or LIBERO-X | No release GGUF/parity evidence in Git | Not validated | Unsupported until real checkpoint gates pass |

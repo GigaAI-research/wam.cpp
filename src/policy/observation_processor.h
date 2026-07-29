@@ -16,8 +16,14 @@ struct PreparedObservation {
     std::vector<float> action_noise;
 };
 
+struct ObservationProcessorOptions {
+    ImageResamplePrecision image_resample_precision =
+        ImageResamplePrecision::u8_intermediate;
+};
+
 PreparedObservation prepare_observation_reference(
     const Observation & inputs, const PolicySpec & policy_spec,
-    std::mt19937 & session_rng);
+    std::mt19937 & session_rng,
+    const ObservationProcessorOptions & options = {});
 
 } // namespace wam::internal::policy
