@@ -7,7 +7,7 @@
 
 namespace wam::internal::fastwam {
 
-struct ArtifactContract;
+struct FastWamContract;
 
 namespace semantics {
 
@@ -41,7 +41,7 @@ SequenceGeometry resolve_geometry(const GeometryInput & input);
 VisualPositions visual_positions(const SequenceGeometry & geometry);
 std::vector<std::int32_t> action_positions(const SequenceGeometry & geometry);
 void validate_policy_semantics(const policy::PolicySpec & policy_spec,
-                               const ArtifactContract & artifact);
+                               const FastWamContract & artifact);
 
 } // namespace semantics
 } // namespace wam::internal::fastwam

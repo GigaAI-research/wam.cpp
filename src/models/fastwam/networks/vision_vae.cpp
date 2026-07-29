@@ -1,8 +1,9 @@
-#include "vae.h"
+#include "models/fastwam/networks/vision_vae.h"
 
-#include "ops.h"
+#include "models/fastwam/networks/ops.h"
 
 #include "backends/ggml/graph_context.h"
+#include "backends/ggml/tensor_io.h"
 #include "wam/error.h"
 
 #include "ggml-alloc.h"
@@ -14,38 +15,29 @@
 namespace wam::internal::fastwam {
 namespace {
 
-ggml_tensor * require_weight(Engine & engine, const std::string & name) {
-    ggml_tensor * value = engine.weight(name.c_str());
-    if (!value) {
-        throw Error(ErrorCode::incompatible_artifact,
-                    "FastWAM VAE weight is missing", {{name, "missing"}});
-    }
-    return value;
-}
-
 ggml_tensor * bias_4d(ggml_context * ctx, ggml_tensor * bias,
                       std::int64_t channels) {
     return ggml_reshape_4d(ctx, bias, 1, 1, channels, 1);
 }
 
-ggml_tensor * conv(ggml_context * ctx, Engine & engine,
+ggml_tensor * conv(ggml_context * ctx, ModelResources & resources,
                    const std::string & prefix, ggml_tensor * input,
                    int stride, int padding) {
-    ggml_tensor * weight = require_weight(engine, prefix + ".weight");
-    ggml_tensor * bias = require_weight(engine, prefix + ".bias");
+    ggml_tensor * weight = ops::require_weight(resources, prefix + ".weight");
+    ggml_tensor * bias = ops::require_weight(resources, prefix + ".bias");
     if (input->type != GGML_TYPE_BF16) input = ggml_cast(ctx, input, GGML_TYPE_BF16);
     ggml_tensor * output = ggml_conv_2d_direct(
         ctx, weight, input, stride, stride, padding, padding, 1, 1);
     return ggml_add(ctx, output, bias_4d(ctx, bias, output->ne[2]));
 }
 
-ggml_tensor * rms(ggml_context * ctx, Engine & engine,
+ggml_tensor * rms(ggml_context * ctx, ModelResources & resources,
                   const std::string & name, ggml_tensor * input) {
     const std::int64_t channels = input->ne[2];
     ggml_tensor * channel_first = ggml_cont(
         ctx, ggml_permute(ctx, input, 1, 2, 0, 3));
     ggml_tensor * gamma = ggml_reshape_1d(
-        ctx, require_weight(engine, name), channels);
+        ctx, ops::require_weight(resources, name), channels);
     if (input->type == GGML_TYPE_BF16 && gamma->type == GGML_TYPE_BF16) {
         return ggml_cont(ctx, ggml_permute(
             ctx, ggml_rms_norm_bf16_f32(ctx, channel_first, gamma, 1.0e-12f),
@@ -62,18 +54,18 @@ ggml_tensor * rms(ggml_context * ctx, Engine & engine,
         2, 0, 1, 3));
 }
 
-ggml_tensor * residual(ggml_context * ctx, Engine & engine,
+ggml_tensor * residual(ggml_context * ctx, ModelResources & resources,
                        const std::string & prefix, ggml_tensor * input) {
     ggml_tensor * shortcut = input;
-    if (engine.weight((prefix + ".skip.weight").c_str())) {
-        shortcut = conv(ctx, engine, prefix + ".skip", input, 1, 0);
+    if (resources.weight((prefix + ".skip.weight").c_str())) {
+        shortcut = conv(ctx, resources, prefix + ".skip", input, 1, 0);
     }
-    ggml_tensor * hidden = rms(ctx, engine, prefix + ".res.0.gamma", input);
+    ggml_tensor * hidden = rms(ctx, resources, prefix + ".res.0.gamma", input);
     hidden = ggml_silu(ctx, hidden);
-    hidden = conv(ctx, engine, prefix + ".res.2", hidden, 1, 1);
-    hidden = rms(ctx, engine, prefix + ".res.3.gamma", hidden);
+    hidden = conv(ctx, resources, prefix + ".res.2", hidden, 1, 1);
+    hidden = rms(ctx, resources, prefix + ".res.3.gamma", hidden);
     hidden = ggml_silu(ctx, hidden);
-    hidden = conv(ctx, engine, prefix + ".res.6", hidden, 1, 1);
+    hidden = conv(ctx, resources, prefix + ".res.6", hidden, 1, 1);
     return ggml_add(ctx, hidden, shortcut);
 }
 
@@ -106,21 +98,21 @@ ggml_tensor * avg_shortcut(ggml_context * ctx, ggml_tensor * input,
     return restore_bf16 ? ggml_cast(ctx, output, GGML_TYPE_BF16) : output;
 }
 
-ggml_tensor * down_block(ggml_context * ctx, Engine & engine, int index,
+ggml_tensor * down_block(ggml_context * ctx, ModelResources & resources, int index,
                          ggml_tensor * input, bool downsample,
                          bool temporal, std::int64_t out_channels) {
     const std::string prefix =
         "fastwam.vae.encoder.down." + std::to_string(index);
     ggml_tensor * original = input;
     ggml_tensor * hidden = residual(
-        ctx, engine, prefix + ".downsamples.0", input);
-    hidden = residual(ctx, engine, prefix + ".downsamples.1", hidden);
+        ctx, resources, prefix + ".downsamples.0", input);
+    hidden = residual(ctx, resources, prefix + ".downsamples.1", hidden);
     if (downsample) {
         if (hidden->type == GGML_TYPE_BF16) {
             hidden = ggml_cast(ctx, hidden, GGML_TYPE_F32);
         }
         hidden = ggml_pad(ctx, hidden, 1, 1, 0, 0);
-        hidden = conv(ctx, engine, prefix + ".downsamples.2.rs.1",
+        hidden = conv(ctx, resources, prefix + ".downsamples.2.rs.1",
                       hidden, 2, 0);
     }
     ggml_tensor * shortcut = avg_shortcut(
@@ -128,22 +120,22 @@ ggml_tensor * down_block(ggml_context * ctx, Engine & engine, int index,
     return ggml_add(ctx, hidden, shortcut);
 }
 
-ggml_tensor * middle_attention(ggml_context * ctx, Engine & engine,
+ggml_tensor * middle_attention(ggml_context * ctx, ModelResources & resources,
                                ggml_tensor * input) {
     const std::string prefix = "fastwam.vae.encoder.mid.1";
     const std::int64_t width = input->ne[0];
     const std::int64_t height = input->ne[1];
     const std::int64_t channels = input->ne[2];
     const std::int64_t tokens = width * height;
-    ggml_tensor * hidden = rms(ctx, engine, prefix + ".norm.gamma", input);
+    ggml_tensor * hidden = rms(ctx, resources, prefix + ".norm.gamma", input);
     hidden = ggml_reshape_2d(
         ctx, ggml_cont(ctx, ggml_permute(ctx, hidden, 1, 2, 0, 3)),
         channels, tokens);
     ggml_tensor * qkv_weight = ggml_reshape_2d(
-        ctx, require_weight(engine, prefix + ".qkv.weight"),
+        ctx, ops::require_weight(resources, prefix + ".qkv.weight"),
         channels, 3 * channels);
     ggml_tensor * qkv = ops::linear(
-        ctx, qkv_weight, require_weight(engine, prefix + ".qkv.bias"), hidden);
+        ctx, qkv_weight, ops::require_weight(resources, prefix + ".qkv.bias"), hidden);
     const std::size_t element_size = ggml_type_size(qkv->type);
     ggml_tensor * q = ggml_cont(ctx, ggml_view_2d(
         ctx, qkv, channels, tokens, qkv->nb[1], 0));
@@ -159,9 +151,9 @@ ggml_tensor * middle_attention(ggml_context * ctx, Engine & engine,
     ggml_tensor * attended = ops::attention(
         ctx, q, k, v, channels, 1, tokens);
     ggml_tensor * projection = ggml_reshape_2d(
-        ctx, require_weight(engine, prefix + ".p.weight"), channels, channels);
+        ctx, ops::require_weight(resources, prefix + ".p.weight"), channels, channels);
     attended = ops::linear(
-        ctx, projection, require_weight(engine, prefix + ".p.bias"), attended);
+        ctx, projection, ops::require_weight(resources, prefix + ".p.bias"), attended);
     attended = ggml_cont(ctx, ggml_permute(
         ctx, ggml_reshape_3d(ctx, attended, channels, width, height),
         2, 0, 1, 3));
@@ -188,7 +180,7 @@ constexpr std::array<float, 48> kStd = {
 } // namespace
 
 std::vector<ggml_bf16_t> encode_first_frame(
-    Engine & engine, const ArtifactContract & artifact,
+    ModelResources & resources, const FastWamContract & artifact,
     const std::vector<float> & patchified_pixels) {
     const Geometry & g = artifact.geometry;
     const std::size_t expected_pixels =
@@ -197,42 +189,39 @@ std::vector<ggml_bf16_t> encode_first_frame(
         throw Error(ErrorCode::invalid_argument,
                     "FastWAM VAE input shape is invalid");
     }
-    ggml_backend::GraphContext resources(128u * 1024u * 1024u);
-    ggml_context * ctx = resources.get();
+    ggml_backend::GraphContext graph_context(128u * 1024u * 1024u);
+    ggml_context * ctx = graph_context.get();
 
     ggml_tensor * pixels = ggml_new_tensor_4d(
         ctx, GGML_TYPE_F32, g.image_width / 2, g.image_height / 2, 12, 1);
     ggml_set_input(pixels);
     ggml_tensor * hidden = conv(
-        ctx, engine, "fastwam.vae.encoder.in", pixels, 1, 1);
-    hidden = down_block(ctx, engine, 0, hidden, true, false, 160);
-    hidden = down_block(ctx, engine, 1, hidden, true, true, 320);
-    hidden = down_block(ctx, engine, 2, hidden, true, true, 640);
-    hidden = down_block(ctx, engine, 3, hidden, false, false, 640);
-    hidden = residual(ctx, engine, "fastwam.vae.encoder.mid.0", hidden);
-    hidden = middle_attention(ctx, engine, hidden);
-    hidden = residual(ctx, engine, "fastwam.vae.encoder.mid.2", hidden);
-    hidden = rms(ctx, engine, "fastwam.vae.encoder.out.0.gamma", hidden);
+        ctx, resources, "fastwam.vae.encoder.in", pixels, 1, 1);
+    hidden = down_block(ctx, resources, 0, hidden, true, false, 160);
+    hidden = down_block(ctx, resources, 1, hidden, true, true, 320);
+    hidden = down_block(ctx, resources, 2, hidden, true, true, 640);
+    hidden = down_block(ctx, resources, 3, hidden, false, false, 640);
+    hidden = residual(ctx, resources, "fastwam.vae.encoder.mid.0", hidden);
+    hidden = middle_attention(ctx, resources, hidden);
+    hidden = residual(ctx, resources, "fastwam.vae.encoder.mid.2", hidden);
+    hidden = rms(ctx, resources, "fastwam.vae.encoder.out.0.gamma", hidden);
     hidden = ggml_silu(ctx, hidden);
-    hidden = conv(ctx, engine, "fastwam.vae.encoder.out.2", hidden, 1, 1);
-    hidden = conv(ctx, engine, "fastwam.vae.quant", hidden, 1, 0);
+    hidden = conv(ctx, resources, "fastwam.vae.encoder.out.2", hidden, 1, 1);
+    hidden = conv(ctx, resources, "fastwam.vae.quant", hidden, 1, 0);
     ggml_tensor * output = ggml_cast(ctx, hidden, GGML_TYPE_F32);
     ggml_set_output(output);
     ggml_cgraph * graph = ggml_new_graph_custom(ctx, 32768, false);
     ggml_build_forward_expand(graph, output);
-    resources.allocate(
-        graph, ggml_backend_get_default_buffer_type(engine.backend()));
-    ggml_backend_tensor_set(pixels, patchified_pixels.data(), 0,
-                            patchified_pixels.size() * sizeof(float));
-    if (ggml_backend_graph_compute(engine.backend(), graph) != GGML_STATUS_SUCCESS) {
+    graph_context.allocate(
+        graph, ggml_backend_get_default_buffer_type(resources.backend()));
+    ggml_backend::set_f32(pixels, patchified_pixels);
+    if (ggml_backend_graph_compute(resources.backend(), graph) != GGML_STATUS_SUCCESS) {
         throw Error(ErrorCode::inference_failed,
                     "FastWAM VAE graph execution failed");
     }
     const std::size_t plane =
         static_cast<std::size_t>(g.image_height / 16) * (g.image_width / 16);
-    std::vector<float> moments(static_cast<std::size_t>(96) * plane);
-    ggml_backend_tensor_get(output, moments.data(), 0,
-                            moments.size() * sizeof(float));
+    const std::vector<float> moments = ggml_backend::get_f32(output);
     std::vector<ggml_bf16_t> result(static_cast<std::size_t>(48) * plane);
     for (std::size_t channel = 0; channel < 48; ++channel) {
         const float mean = ggml_bf16_to_fp32(

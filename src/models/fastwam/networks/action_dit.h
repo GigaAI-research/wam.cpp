@@ -1,7 +1,7 @@
 #pragma once
 
-#include "models/fastwam/artifact.h"
-#include "engine_internal.h"
+#include "models/fastwam/contract.h"
+#include "models/fastwam/state.h"
 
 #include "ggml.h"
 
@@ -21,7 +21,7 @@ struct VideoKvCache {
 };
 
 std::vector<float> run_action_dit_step(
-    Engine & engine, const ArtifactContract & artifact,
+    ModelResources & resources, const FastWamContract & artifact,
     const std::vector<ggml_bf16_t> & action_input,
     const std::vector<ggml_bf16_t> & context,
     std::size_t context_tokens,

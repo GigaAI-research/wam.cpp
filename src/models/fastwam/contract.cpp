@@ -1,4 +1,4 @@
-#include "models/fastwam/artifact.h"
+#include "models/fastwam/contract.h"
 
 #include "artifact/gguf_reader.h"
 #include "artifact/tensor_spec.h"
@@ -183,7 +183,7 @@ void require_component_count(const ArtifactComponentInfo & component,
 
 } // namespace
 
-std::shared_ptr<const ArtifactContract> load_artifact(
+std::shared_ptr<const FastWamContract> load_contract(
     std::shared_ptr<GgufReader> reader,
     const policy::PolicySpec & policy_spec) {
     if (!reader) {
@@ -195,7 +195,7 @@ std::shared_ptr<const ArtifactContract> load_artifact(
                      "expected fastwam");
     }
 
-    auto artifact = std::make_shared<ArtifactContract>();
+    auto artifact = std::make_shared<FastWamContract>();
     artifact->reader = std::move(reader);
     artifact->conversion_policy =
         artifact->reader->require_string("fastwam.conversion_policy");
@@ -306,11 +306,11 @@ std::shared_ptr<const ArtifactContract> load_artifact(
                                 expected_counts[index]);
     }
 
-    validate_artifact(*artifact, policy_spec);
+    validate_contract(*artifact, policy_spec);
     return artifact;
 }
 
-void validate_artifact(const ArtifactContract & artifact,
+void validate_contract(const FastWamContract & artifact,
                        const policy::PolicySpec & policy_spec) {
     semantics::validate_policy_semantics(policy_spec, artifact);
 }

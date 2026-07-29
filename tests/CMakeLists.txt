@@ -271,6 +271,7 @@ if(WAM_BUILD_GWP05)
 endif()
 
 if(WAM_BUILD_FASTWAM)
+    wam_add_test(wam_fastwam_pipeline unit/fastwam_pipeline.cpp)
     wam_add_test(wam_fastwam_semantics unit/fastwam_semantics.cpp)
 
     add_executable(wam_fastwam_libero_artifact
@@ -367,6 +368,8 @@ if(WAM_BUILD_GWP05)
 endif()
 
 if(WAM_BUILD_FASTWAM)
+    target_include_directories(wam_fastwam_pipeline PRIVATE
+        ${PROJECT_SOURCE_DIR}/src)
     target_include_directories(wam_fastwam_semantics PRIVATE
         ${PROJECT_SOURCE_DIR}/src)
 endif()

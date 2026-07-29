@@ -1,6 +1,6 @@
 #pragma once
 
-#include "models/fastwam/artifact.h"
+#include "models/fastwam/contract.h"
 #include "runtime/runtime_types.h"
 #include "policy/observation_processor.h"
 #include "wam/observation.h"
@@ -21,7 +21,7 @@ struct PreparedInputs {
 using CoreAction = runtime::CoreAction;
 
 PreparedInputs prepare_inputs(const Observation & inputs,
-                              const ArtifactContract & artifact,
+                              const FastWamContract & artifact,
                               const policy::PolicySpec & policy_spec,
                               LanguageRuntimeMode language_mode,
                               std::mt19937 & session_rng);

@@ -73,6 +73,7 @@ int main() {
 
         ggml_backend::WeightStore weights(moved.get(), 2);
         weights.define("weight", wam::DType::f32, {2});
+        weights.define("bf16_weight", wam::DType::bf16, {2});
         require_error(
             [&] { weights.define("invalid", wam::DType::f32, {0}); },
             wam::ErrorCode::failed_precondition,
@@ -86,6 +87,14 @@ int main() {
         weights.set("weight", expected.data(), expected.size() * sizeof(float));
         require(ggml_backend::get_f32(weights.find("weight")) == expected,
                 "WeightStore upload/readback failed");
+        const std::vector<ggml_bf16_t> expected_bf16 = {
+            ggml_fp32_to_bf16(1.5F), ggml_fp32_to_bf16(-2.0F)};
+        ggml_backend::set_bf16(weights.find("bf16_weight"), expected_bf16);
+        const std::vector<ggml_bf16_t> actual_bf16 =
+            ggml_backend::get_bf16(weights.find("bf16_weight"));
+        require(actual_bf16[0].bits == expected_bf16[0].bits &&
+                    actual_bf16[1].bits == expected_bf16[1].bits,
+                "BF16 tensor upload/readback failed");
 
         ggml_backend::GraphContext graph(1024 * 1024);
         ggml_tensor * input = ggml_new_tensor_1d(graph.get(), GGML_TYPE_F32, 2);

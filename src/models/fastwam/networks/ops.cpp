@@ -1,6 +1,8 @@
-#include "ops.h"
+#include "models/fastwam/networks/ops.h"
 
 #include "backends/ggml/graph_ops.h"
+#include "models/fastwam/state.h"
+#include "wam/error.h"
 
 #include <cmath>
 
@@ -11,6 +13,16 @@ using ggml_backend::as_bf16;
 using ggml_backend::as_f32;
 
 } // namespace
+
+ggml_tensor * require_weight(ModelResources & resources,
+                             const std::string & name) {
+    ggml_tensor * value = resources.weight(name.c_str());
+    if (!value) {
+        throw Error(ErrorCode::incompatible_artifact,
+                    "FastWAM network weight is missing", {{name, "missing"}});
+    }
+    return value;
+}
 
 ggml_tensor * linear(ggml_context * ctx, ggml_tensor * weight,
                      ggml_tensor * bias, ggml_tensor * input) {

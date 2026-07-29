@@ -61,6 +61,22 @@ wam_assert_no_match(
 file(GLOB_RECURSE fastwam_sources
     "${WAM_SOURCE_DIR}/src/models/fastwam/*.h"
     "${WAM_SOURCE_DIR}/src/models/fastwam/*.cpp")
+if(EXISTS "${WAM_SOURCE_DIR}/src/models/fastwam/engine" OR
+   EXISTS "${WAM_SOURCE_DIR}/src/models/fastwam/engine_internal.h")
+    message(FATAL_ERROR
+        "FastWAM legacy engine directory or bus header was reintroduced")
+endif()
+file(GLOB_RECURSE fastwam_network_sources
+    "${WAM_SOURCE_DIR}/src/models/fastwam/networks/*.h"
+    "${WAM_SOURCE_DIR}/src/models/fastwam/networks/*.cpp")
+wam_assert_no_match(
+    "FastWAM private engine namespace was reintroduced"
+    "namespace[ \\t]+engine([ \\t]*\\{|[ \\t]*$)"
+    ${fastwam_sources})
+wam_assert_no_match(
+    "FastWAM network code depends on artifact, policy, model, or serving"
+    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/)"
+    ${fastwam_network_sources})
 wam_assert_no_match(
     "GWP05 code depends on FastWAM"
     "#[ \t]*include[ \t]*[<\"]models/fastwam/"

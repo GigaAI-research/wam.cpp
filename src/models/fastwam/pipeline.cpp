@@ -1,9 +1,11 @@
-#include "pipeline.h"
+#include "models/fastwam/pipeline.h"
 
-#include "action_dit.h"
-#include "scheduler.h"
-#include "vae.h"
-#include "video_dit.h"
+#include "models/fastwam/networks/action_dit.h"
+#include "models/fastwam/networks/proprio_projector.h"
+#include "models/fastwam/scheduler.h"
+#include "models/fastwam/state.h"
+#include "models/fastwam/networks/vision_vae.h"
+#include "models/fastwam/networks/video_dit.h"
 
 #include "wam/error.h"
 #include "runtime/telemetry.h"
@@ -84,23 +86,10 @@ std::vector<ggml_bf16_t> embedding_bf16(const Tensor & tensor) {
 
 void append_proprio(std::vector<ggml_bf16_t> & context,
                     std::vector<std::int32_t> & mask,
-                    const std::vector<float> & state,
-                    const ArtifactContract & artifact) {
-    const Geometry & geometry = artifact.geometry;
-    std::vector<float> token(geometry.text_dim);
-    for (std::uint32_t output = 0; output < geometry.text_dim; ++output) {
-        float value = artifact.proprio_bias[output];
-        const std::size_t row =
-            static_cast<std::size_t>(output) * geometry.proprio_dim;
-        for (std::uint32_t input = 0; input < geometry.proprio_dim; ++input) {
-            value += artifact.proprio_weight[row + input] * state[input];
-        }
-        token[output] = value;
-    }
+                    const std::vector<ggml_bf16_t> & token) {
     const std::size_t offset = context.size();
     context.resize(offset + token.size());
-    ggml_fp32_to_bf16_row(token.data(), context.data() + offset,
-                          static_cast<std::int64_t>(token.size()));
+    std::copy(token.begin(), token.end(), context.begin() + offset);
     mask.push_back(1);
 }
 
@@ -114,44 +103,83 @@ std::vector<ggml_bf16_t> initial_noise(const PreparedInputs & inputs) {
 
 } // namespace
 
-CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
+LoadedModel load_model_resources(const FastWamContract & contract,
+                                 const ModelOptions & options) {
+    if (options.backend != Backend::automatic &&
+        options.backend != Backend::cuda) {
+        throw Error(ErrorCode::unsupported,
+                    "FastWAM execution requires the CUDA backend");
+    }
+    if (options.compute_precision != ComputePrecision::automatic &&
+        options.compute_precision != ComputePrecision::bf16) {
+        throw Error(ErrorCode::unsupported,
+                    "FastWAM supports BF16 compute only");
+    }
+    auto logger = options.logger
+        ? options.logger
+        : std::make_shared<runtime::Logger>(RuntimeConfig{});
+    auto debug_dump = options.debug_dump
+        ? options.debug_dump
+        : std::make_shared<ggml_backend::DebugDump>();
+    auto resources = std::make_shared<ModelResources>(
+        std::move(logger), std::move(debug_dump));
+    if (!resources->initialize(contract, options.device_index)) {
+        throw Error(ErrorCode::resource_exhausted,
+                    "cannot initialize FastWAM BF16 CUDA resources");
+    }
+    runtime::EngineInfo info;
+    info.backend = Backend::cuda;
+    info.compute_precision = ComputePrecision::bf16;
+    info.resident_device_bytes = resources->resident_device_bytes;
+    info.peak_component_device_bytes = resources->resident_device_bytes;
+    info.runtime_components = resources->runtime_components;
+    return {std::move(resources), std::move(info)};
+}
+
+std::unique_ptr<SessionState> create_session_state() {
+    return std::make_unique<SessionState>();
+}
+
+CoreAction run_pipeline(ModelResources & resources, SessionState & state,
+                        const FastWamContract & contract,
                         const PreparedInputs & inputs) {
-    const Geometry & geometry = artifact.geometry;
+    std::lock_guard<std::mutex> lock(resources.execution_mutex);
+    const Geometry & geometry = contract.geometry;
     CoreAction result;
     const Clock::time_point model_begin = Clock::now();
 
     std::vector<ggml_bf16_t> context = embedding_bf16(inputs.embedding);
     std::vector<std::int32_t> context_mask =
         inputs.embedding_attention_mask;
-    append_proprio(context, context_mask, inputs.observation.model_state,
-                   artifact);
+    append_proprio(context, context_mask,
+                   project_proprio(inputs.observation.model_state, contract));
     const std::size_t context_tokens = context_mask.size();
-    engine.debug_dump().write("context", context,
+    resources.debug_dump().write("context", context,
                 {static_cast<std::int64_t>(context_tokens),
                  static_cast<std::int64_t>(geometry.text_dim)});
 
     Clock::time_point phase_begin = Clock::now();
     const std::vector<float> pixels =
         vae_pixels(inputs.observation.composite_image, geometry);
-    engine.debug_dump().write("vae_pixels", pixels,
+    resources.debug_dump().write("vae_pixels", pixels,
                 {12, static_cast<std::int64_t>(geometry.image_height / 2),
                  static_cast<std::int64_t>(geometry.image_width / 2)});
     const std::vector<ggml_bf16_t> latent = encode_first_frame(
-        engine, artifact, pixels);
-    engine.debug_dump().write("vae_latent", latent,
+        resources, contract, pixels);
+    resources.debug_dump().write("vae_latent", latent,
                 {static_cast<std::int64_t>(geometry.latent_channels),
                  static_cast<std::int64_t>(
-                     artifact.sequence_geometry.latent_height),
+                     contract.sequence_geometry.latent_height),
                  static_cast<std::int64_t>(
-                     artifact.sequence_geometry.latent_width)});
+                     contract.sequence_geometry.latent_width)});
     result.stats.model_vision_milliseconds = elapsed_ms(phase_begin);
     runtime::append_timing(result.stats, "observation_encoder",
                            result.stats.model_vision_milliseconds);
 
     phase_begin = Clock::now();
     const VideoKvCache video_cache = prefill_video_cache(
-        engine, artifact, latent, context, context_mask, context_tokens);
-    if (engine.debug_dump().enabled()) {
+        resources, contract, latent, context, context_mask, context_tokens);
+    if (resources.debug_dump().enabled()) {
         const std::vector<std::int64_t> cache_shape = {
             static_cast<std::int64_t>(video_cache.tokens),
             static_cast<std::int64_t>(geometry.num_heads),
@@ -159,9 +187,9 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
         for (std::uint32_t layer = 0; layer < geometry.num_layers; ++layer) {
             const std::string index = layer < 10
                 ? "0" + std::to_string(layer) : std::to_string(layer);
-            engine.debug_dump().write("video_k_" + index, video_cache.layers[layer].key,
+            resources.debug_dump().write("video_k_" + index, video_cache.layers[layer].key,
                         cache_shape);
-            engine.debug_dump().write("video_v_" + index, video_cache.layers[layer].value,
+            resources.debug_dump().write("video_v_" + index, video_cache.layers[layer].value,
                         cache_shape);
         }
     }
@@ -173,21 +201,21 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
     const std::vector<std::int64_t> action_shape = {
         static_cast<std::int64_t>(geometry.action_horizon),
         static_cast<std::int64_t>(geometry.action_dim)};
-    engine.debug_dump().write("action_state_00", action, action_shape);
+    resources.debug_dump().write("action_state_00", action, action_shape);
     const FlowSchedule schedule = make_inference_schedule(
         static_cast<int>(geometry.inference_steps), geometry.action_shift);
     const std::vector<std::int32_t> positions =
-        semantics::action_positions(artifact.sequence_geometry);
+        semantics::action_positions(contract.sequence_geometry);
     phase_begin = Clock::now();
     std::vector<float> action_f32(action.size());
     for (std::size_t step = 0; step < schedule.steps(); ++step) {
         const std::vector<float> velocity = run_action_dit_step(
-            engine, artifact, action, context, context_tokens, context_mask,
+            resources, contract, action, context, context_tokens, context_mask,
             video_cache, schedule.timesteps[step], positions);
         const std::string step_name = step + 1 < 10
             ? "0" + std::to_string(step + 1)
             : std::to_string(step + 1);
-        engine.debug_dump().write("action_velocity_" + step_name, velocity, action_shape);
+        resources.debug_dump().write("action_velocity_" + step_name, velocity, action_shape);
         for (std::size_t index = 0; index < action.size(); ++index) {
             const ggml_bf16_t product = ggml_fp32_to_bf16(
                 velocity[index] * schedule.deltas[step]);
@@ -195,18 +223,24 @@ CoreAction run_pipeline(Engine & engine, const ArtifactContract & artifact,
                 ggml_bf16_to_fp32(product);
             action[index] = ggml_fp32_to_bf16(action_f32[index]);
         }
-        engine.debug_dump().write("action_state_" + step_name, action, action_shape);
+        resources.debug_dump().write("action_state_" + step_name, action, action_shape);
     }
     result.stats.model_decode_milliseconds = elapsed_ms(phase_begin);
     runtime::append_timing(result.stats, "action_denoise",
                            result.stats.model_decode_milliseconds);
     ggml_bf16_to_fp32_row(action.data(), action_f32.data(),
                           static_cast<std::int64_t>(action.size()));
-    engine.debug_dump().write("action_normalized", action_f32, action_shape);
+    resources.debug_dump().write("action_normalized", action_f32, action_shape);
     result.values = std::move(action_f32);
     result.stats.model_milliseconds = elapsed_ms(model_begin);
-    result.stats.peak_device_memory_bytes = engine.resident_device_bytes;
+    result.stats.peak_device_memory_bytes = resources.resident_device_bytes;
+    ++state.prediction_count;
     return result;
+}
+
+void reset_session(ModelResources & resources, SessionState & state) {
+    std::lock_guard<std::mutex> lock(resources.execution_mutex);
+    state.reset();
 }
 
 } // namespace wam::internal::fastwam

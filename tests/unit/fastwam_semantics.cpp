@@ -1,11 +1,11 @@
-#include "models/fastwam/artifact.h"
-#include "models/fastwam/engine/scheduler.h"
+#include "models/fastwam/contract.h"
+#include "models/fastwam/scheduler.h"
 #include "models/fastwam/semantics.h"
 #include "support/test_utils.h"
 
 #include <vector>
 
-using wam::internal::fastwam::ArtifactContract;
+using wam::internal::fastwam::FastWamContract;
 using wam::internal::fastwam::semantics::GeometryInput;
 using wam::internal::fastwam::semantics::resolve_geometry;
 using wam::test::require_error;

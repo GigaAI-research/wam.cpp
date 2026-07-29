@@ -142,7 +142,7 @@ int main(int argc, char ** argv) {
     wam::Session peer_session = model.create_session(session_options);
     const wam::Prediction peer_random = peer_session.predict(inputs);
     require(first_random.action.data == peer_random.action.data,
-            "FastWAM engine sessions do not own independent RNG state");
+            "FastWAM Sessions do not own independent RNG state");
     session.reset();
     const wam::Prediction reset_random = session.predict(inputs);
     require(first_random.action.data == reset_random.action.data,

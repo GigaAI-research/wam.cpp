@@ -18,7 +18,7 @@ namespace {
 } // namespace
 
 PreparedInputs prepare_inputs(const Observation & inputs,
-                              const ArtifactContract & artifact,
+                              const FastWamContract & artifact,
                               const policy::PolicySpec & policy_spec,
                               LanguageRuntimeMode language_mode,
                               std::mt19937 & session_rng) {

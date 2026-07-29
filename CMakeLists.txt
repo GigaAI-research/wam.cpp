@@ -170,18 +170,19 @@ endif()
 
 if(WAM_BUILD_FASTWAM)
     add_library(wam_model_fastwam OBJECT
-        src/models/fastwam/artifact.cpp
-        src/models/fastwam/engine/action_dit.cpp
-        src/models/fastwam/engine/engine.cpp
-        src/models/fastwam/engine/ops.cpp
-        src/models/fastwam/engine/pipeline.cpp
-        src/models/fastwam/engine/scheduler.cpp
-        src/models/fastwam/engine/vae.cpp
-        src/models/fastwam/engine/video_dit.cpp
+        src/models/fastwam/contract.cpp
         src/models/fastwam/inputs.cpp
         src/models/fastwam/module.cpp
         src/models/fastwam/model.cpp
-        src/models/fastwam/semantics.cpp)
+        src/models/fastwam/pipeline.cpp
+        src/models/fastwam/scheduler.cpp
+        src/models/fastwam/semantics.cpp
+        src/models/fastwam/state.cpp
+        src/models/fastwam/networks/action_dit.cpp
+        src/models/fastwam/networks/ops.cpp
+        src/models/fastwam/networks/proprio_projector.cpp
+        src/models/fastwam/networks/video_dit.cpp
+        src/models/fastwam/networks/vision_vae.cpp)
     add_library(wam::model_fastwam ALIAS wam_model_fastwam)
     wam_configure_internal_target(wam_model_fastwam)
     target_link_libraries(wam_model_fastwam PRIVATE

@@ -3,8 +3,16 @@
 #include "ggml.h"
 
 #include <cstdint>
+#include <string>
 
-namespace wam::internal::fastwam::ops {
+namespace wam::internal::fastwam {
+
+class ModelResources;
+
+namespace ops {
+
+ggml_tensor * require_weight(ModelResources & resources,
+                             const std::string & name);
 
 ggml_tensor * linear(ggml_context * ctx, ggml_tensor * weight,
                      ggml_tensor * bias, ggml_tensor * input);
@@ -34,4 +42,5 @@ ggml_tensor * attention(ggml_context * ctx, ggml_tensor * q,
                         std::int64_t query_tokens,
                         ggml_tensor * mask = nullptr);
 
-} // namespace wam::internal::fastwam::ops
+} // namespace ops
+} // namespace wam::internal::fastwam

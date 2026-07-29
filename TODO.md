@@ -573,6 +573,22 @@ SessionConfig 包含：
 
 验收：FastWAM LIBERO/RoboTwin Artifact gate、frozen replay parity、显式 noise、reset、错误 backend/precision 和 simulator smoke 通过。
 
+完成状态：
+
+- 已按机械迁移优先原则将 Vision VAE、VideoDiT 和 ActionDiT 移入 `networks/`，将 flow scheduler 留在 FastWAM 模型目录；Tensor 名称、图容量、算子顺序、BF16 更新规则和 scheduler 数值未做设计性改写。
+- 已将 FastWAM Artifact 语义收敛为 `FastWamContract`。`contract.*` 负责模型特有 metadata、Tensor inventory/shape/dtype、网络 geometry、conversion policy 和不可变 proprio 权重；通用 GGUF/Tensor schema 仍由 `src/artifact/` 负责。
+- 已删除旧 `src/models/fastwam/engine/`、`engine_internal.h`、`Engine/EngineSession` 和自定义 deleter。`model.cpp` 直接持有共享 `ModelResources`，每个 `SessionImpl` 独占 `SessionState` 与 RNG；共享资源上的 execution mutex 明确当前多 Session 可创建但串行执行。
+- 已建立线性 `pipeline.*`，按 Context/Proprio -> Vision VAE -> VideoDiT prefill -> ActionDiT flow denoise -> action 的顺序表达一次推理。带权重的 proprio projection 已从 Pipeline 移入 `networks/proprio_projector.*`，Pipeline 不再实现网络权重计算。
+- `ModelResources` 独占 CUDA BackendContext、WeightStore、Logger 和 DebugDump；`SessionState` 只保存 Session 可变状态。源码边界测试禁止恢复 FastWAM 旧 engine 目录、总线头、私有 `engine` namespace，以及 network 对 Artifact parser、Policy、Model 或 Serving 的反向依赖。
+- 三个 network 重复的 `require_weight` 已收敛到模型本地 `networks/ops.*`；F32/BF16 host Tensor 读写统一使用 `backends/ggml/tensor_io.*`，公共 BF16 读写增加了独立 Backend 单元测试。模型专有 I32 position Tensor 保持在 network 内部。
+- 已增加纯合成测试，覆盖 proprio projection、错误 backend/precision、SessionState 隔离/reset、显式 noise 不消耗 RNG，以及相同 seed 生成相同 noise；既有 LIBERO frozen replay gate 继续覆盖公开 Action parity、Session RNG 推进、peer Session 和 reset 恢复。
+- 本地验证结果：默认 CPU 37/37、关闭 GWP05/FastWAM/Serving 的 Runtime-only 25/25、CUDA 12.4 + cuDNN + `sm_80` 37/37；安装消费和源码边界测试包含在上述矩阵中。
+
+待完成的外部门禁：
+
+- 当前构建未配置 `WAM_TEST_FASTWAM_LIBERO_GGUF`、`WAM_TEST_FASTWAM_LIBERO_REPLAY_DIR` 和 `WAM_TEST_FASTWAM_ROBOTWIN_GGUF`，因此真实 LIBERO/RoboTwin Artifact gate、CUDA frozen replay parity 和 simulator smoke 尚未执行。
+- Phase 6 的结构迁移与默认验收已经完成；在真实资产 parity 和至少一个 simulator smoke 通过前，不把 FastWAM 数值迁移标记为最终完成，也不进入会改变 FastWAM 数学的优化。
+
 ### Phase 7：C ABI、Python SDK 和用户工具
 
 - 发布 C ABI v4，并明确 struct version、内存 ownership 和错误释放。

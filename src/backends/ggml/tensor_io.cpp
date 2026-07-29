@@ -50,4 +50,26 @@ std::vector<float> get_f32(ggml_tensor * tensor) {
     return values;
 }
 
+void set_bf16(ggml_tensor * tensor,
+              const std::vector<ggml_bf16_t> & values) {
+    if (tensor == nullptr || tensor->type != GGML_TYPE_BF16 ||
+        static_cast<std::size_t>(ggml_nelements(tensor)) != values.size()) {
+        throw Error(ErrorCode::invalid_argument,
+                    "GGML BF16 tensor input contract mismatch");
+    }
+    ggml_backend_tensor_set(
+        tensor, values.data(), 0, values.size() * sizeof(ggml_bf16_t));
+}
+
+std::vector<ggml_bf16_t> get_bf16(ggml_tensor * tensor) {
+    if (tensor == nullptr || tensor->type != GGML_TYPE_BF16) {
+        throw Error(ErrorCode::invalid_argument,
+                    "GGML BF16 tensor output contract mismatch");
+    }
+    std::vector<ggml_bf16_t> values(ggml_nelements(tensor));
+    ggml_backend_tensor_get(
+        tensor, values.data(), 0, values.size() * sizeof(ggml_bf16_t));
+    return values;
+}
+
 } // namespace wam::internal::ggml_backend

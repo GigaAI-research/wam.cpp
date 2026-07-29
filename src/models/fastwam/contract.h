@@ -39,7 +39,7 @@ struct Geometry {
     std::string variant;
 };
 
-struct ArtifactContract {
+struct FastWamContract {
     std::shared_ptr<GgufReader> reader;
     Geometry geometry;
     semantics::SequenceGeometry sequence_geometry;
@@ -49,10 +49,10 @@ struct ArtifactContract {
     std::vector<ArtifactComponentInfo> components;
 };
 
-std::shared_ptr<const ArtifactContract> load_artifact(
+std::shared_ptr<const FastWamContract> load_contract(
     std::shared_ptr<GgufReader> reader,
     const policy::PolicySpec & policy_spec);
-void validate_artifact(const ArtifactContract & artifact,
+void validate_contract(const FastWamContract & artifact,
                        const policy::PolicySpec & policy_spec);
 
 } // namespace fastwam

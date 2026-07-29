@@ -1,5 +1,5 @@
 #include "artifact/artifact_view.h"
-#include "models/fastwam/artifact.h"
+#include "models/fastwam/contract.h"
 #include "models/fastwam/inputs.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"
@@ -21,7 +21,7 @@ int main(int argc, char ** argv) {
     const auto policy_spec =
         wam::internal::policy::try_read_policy_spec(artifact_view);
     require(policy_spec.has_value(), "FastWAM PolicySpec is missing");
-    const auto artifact = wam::internal::fastwam::load_artifact(
+    const auto artifact = wam::internal::fastwam::load_contract(
         reader, *policy_spec);
 
     require(policy_spec->identity.profile ==
