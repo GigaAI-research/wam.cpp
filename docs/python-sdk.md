@@ -29,8 +29,8 @@ The NPZ must contain `state` and one or more `image.<role>` HWC U8 arrays. It ma
 instead contain `token_ids` plus `attention_mask`, or `embedding` plus
 `embedding_attention_mask`.
 
-The remote `wam.Client` wraps the current WebSocket service. Its wire protocol is
-still v0.5 during Phase 7 and is upgraded independently in Phase 8.
+The remote `wam.Client` uses `wam.rpc.v06`. Remote failures raise `RemoteError`
+with stable RPC code, field-level details, and a fatal flag.
 
 ## C ABI ownership
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import sys
@@ -16,16 +15,17 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.rpc import RpcClient
+from wam.adapters.libero import (
+    ACTION_FIELDS, STATE_FIELDS, LiberoAdapter)
+from wam.eval import (ActionChunkExecutor, ResultWriter, VideoWriter,
+                      canonical_json as _canonical_json,
+                      distribution as _distribution,
+                      load_jsonl as _load_jsonl,
+                      write_json as _write_json_atomic,
+                      write_jsonl as _write_jsonl_atomic)
 
 
-STATE_FIELDS = (
-    "eef.position.x", "eef.position.y", "eef.position.z",
-    "eef.rotation.axis_angle.x", "eef.rotation.axis_angle.y",
-    "eef.rotation.axis_angle.z", "gripper.left", "gripper.right")
-ACTION_FIELDS = (
-    "eef.delta.position.x", "eef.delta.position.y", "eef.delta.position.z",
-    "eef.delta.rotation.axis_angle.x", "eef.delta.rotation.axis_angle.y",
-    "eef.delta.rotation.axis_angle.z", "gripper.command")
+_ADAPTER = LiberoAdapter()
 MAX_STEPS = {"libero_spatial": 400, "libero_object": 400,
              "libero_goal": 400, "libero_10": 700, "libero_90": 700}
 MANIFEST_FORMAT = "wam-libero-manifest-v3"
@@ -33,58 +33,6 @@ RESULT_FORMAT = "wam-libero-eval-v1"
 LATENCY_FIELDS = (
     "rpc_roundtrip_milliseconds", "server_total_milliseconds",
     "server_model_milliseconds", "server_text_milliseconds")
-
-
-def check_observation_compatibility(policy_spec):
-    roles = {view.role for view in policy_spec.images.views}
-    if roles != {"scene", "wrist"}:
-        raise RuntimeError(f"LIBERO requires scene/wrist image roles, got {sorted(roles)}")
-    if tuple(policy_spec.state.fields) != STATE_FIELDS:
-        raise RuntimeError("LIBERO state field order does not match the server PolicySpec")
-
-
-def _quat2axisangle(value):
-    quat = np.asarray(value, dtype=np.float64).copy()
-    quat[3] = np.clip(quat[3], -1.0, 1.0)
-    denominator = math.sqrt(max(0.0, 1.0 - quat[3] * quat[3]))
-    if math.isclose(denominator, 0.0):
-        return np.zeros(3, dtype=np.float32)
-    return np.asarray(quat[:3] * (2.0 * math.acos(quat[3]) / denominator),
-                      dtype=np.float32)
-
-
-def observation_to_policy_observation(observation, policy_spec):
-    check_observation_compatibility(policy_spec)
-    images = [
-        {"name": "scene", "data": np.ascontiguousarray(
-            observation["agentview_image"][::-1, ::-1], dtype=np.uint8)},
-        {"name": "wrist", "data": np.ascontiguousarray(
-            observation["robot0_eye_in_hand_image"][::-1, ::-1], dtype=np.uint8)},
-    ]
-    state = np.concatenate((
-        observation["robot0_eef_pos"],
-        _quat2axisangle(observation["robot0_eef_quat"]),
-        observation["robot0_gripper_qpos"])).astype(np.float32)
-    return images, state
-
-
-def check_action_compatibility(policy_spec):
-    action = policy_spec.action
-    if tuple(action.fields) != ACTION_FIELDS or action.real_dim != 7:
-        raise RuntimeError("LIBERO requires the frozen 7D delta-pose action contract")
-    if action.representation != "eef_delta_pose" or action.frame != "robot_base":
-        raise RuntimeError("LIBERO requires robot_base eef_delta_pose actions")
-
-
-def policy_action_to_command(action, policy_spec, binarize_gripper=True):
-    check_action_compatibility(policy_spec)
-    command = np.asarray(action, dtype=np.float32).copy()
-    if command.shape != (7,):
-        raise ValueError(f"LIBERO command must be 7D, got {command.shape}")
-    command[-1] = 1.0 - 2.0 * command[-1]
-    if binarize_gripper:
-        command[-1] = np.sign(command[-1])
-    return command
 
 
 def _parse_task_ids(value):
@@ -102,11 +50,6 @@ def _parse_task_ids(value):
         else:
             result.add(int(part))
     return sorted(result)
-
-
-def _canonical_json(value):
-    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) +
-            "\n").encode()
 
 
 def _manifest_hash(value):
@@ -201,66 +144,15 @@ def validate_task_aligned_selection(entries, start, end):
         raise ValueError("episode shard must end at a LIBERO task boundary")
 
 
-def _distribution(values):
-    array = np.asarray(values, dtype=np.float64)
-    if not array.size:
-        return {"count": 0}
-    return {
-        "count": int(array.size), "mean": float(array.mean()),
-        "stddev": float(array.std()), "minimum": float(array.min()),
-        "p50": float(np.percentile(array, 50)),
-        "p95": float(np.percentile(array, 95)),
-        "p99": float(np.percentile(array, 99)),
-        "maximum": float(array.max()),
-    }
-
-
-def _load_jsonl(path):
-    if not path.exists():
-        return []
-    result = []
-    with path.open("r", encoding="utf-8") as source:
-        for line_number, line in enumerate(source, 1):
-            if line.strip():
-                try:
-                    result.append(json.loads(line))
-                except json.JSONDecodeError as error:
-                    raise ValueError(
-                        f"invalid JSONL at {path}:{line_number}: {error}") from error
-    return result
-
-
 def _append_jsonl(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as output:
-        output.write(json.dumps(value, sort_keys=True) + "\n")
-        output.flush()
-        os.fsync(output.fileno())
-
-
-def _write_jsonl_atomic(path, values):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    with temporary.open("w", encoding="utf-8") as output:
-        for value in values:
-            output.write(json.dumps(value, sort_keys=True) + "\n")
-        output.flush()
-        os.fsync(output.fileno())
-    os.replace(temporary, path)
-
-
-def _write_json_atomic(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    temporary.write_bytes(_canonical_json(value))
-    os.replace(temporary, path)
+    ResultWriter(path).append(value)
 
 
 def _model_identity(info):
     return {
         "architecture": info.architecture,
         "artifact_policy": info.artifact_policy,
-        "artifact_sha256": info.artifact_sha256,
+        "artifact_bytes": info.artifact_bytes,
         "profile": info.policy_spec.profile,
         "checkpoint_revision": info.policy_spec.checkpoint_revision,
     }
@@ -394,6 +286,13 @@ class EpisodeRunner:
         self.task_id = None
         self.task = None
         self.init_states = None
+        self.executor = ActionChunkExecutor(
+            int(execution["replan_steps"]),
+            lambda chunk: LiberoAdapter(
+                bool(execution["binarize_gripper"])).action(
+                    chunk, info.policy_spec))
+        self.adapter = LiberoAdapter(bool(execution["binarize_gripper"]))
+        self.adapter.validate(info.policy_spec)
 
     def close(self):
         if self.env is not None:
@@ -430,16 +329,14 @@ class EpisodeRunner:
         if video_output is None and self.video_dir is not None:
             video_output = self.video_dir / f"{entry['episode_id']}.mp4"
         if video_output is not None:
-            import imageio.v2 as imageio
-            video_output.parent.mkdir(parents=True, exist_ok=True)
-            writer = imageio.get_writer(str(video_output), fps=20)
+            writer = VideoWriter(video_output, fps=20).open()
         requests = []
         started = time.perf_counter()
         try:
             done = False
             for _ in range(int(self.execution["num_steps_wait"])):
                 if writer:
-                    writer.append_data(observation["agentview_image"][::-1, ::-1])
+                    writer.append(observation["agentview_image"][::-1, ::-1])
                 observation, _, done, _ = self.env.step(
                     [0, 0, 0, 0, 0, 0, -1])
                 if done:
@@ -447,7 +344,7 @@ class EpisodeRunner:
             steps = 0
             limit = int(self.execution["max_steps"])
             while not done and steps < limit:
-                images, state = observation_to_policy_observation(
+                images, state = self.adapter.observation(
                     observation, self.info.policy_spec)
                 noise = donor_action_noise(
                     self.execution["action_noise_seed"],
@@ -466,14 +363,13 @@ class EpisodeRunner:
                     "server_text_milliseconds": stats.model_text_milliseconds,
                     "peak_device_memory_bytes": stats.peak_device_memory_bytes,
                 })
-                for action in chunk[:int(self.execution["replan_steps"])]:
-                    command = policy_action_to_command(
-                        action, self.info.policy_spec,
-                        bool(self.execution["binarize_gripper"]))
+                self.executor.push(chunk)
+                while self.executor.pending:
+                    command = self.executor.next()
                     observation, _, done, _ = self.env.step(command)
                     steps += 1
                     if writer:
-                        writer.append_data(
+                        writer.append(
                             observation["agentview_image"][::-1, ::-1])
                     if done or steps >= limit:
                         break
@@ -567,8 +463,7 @@ def _run_manifest(args, manifest, suite, get_libero_path, env_type):
     runner = None
     try:
         info = rpc.connect()
-        check_observation_compatibility(info.policy_spec)
-        check_action_compatibility(info.policy_spec)
+        _ADAPTER.validate(info.policy_spec)
         execution = manifest["execution"]
         _validate_runtime(info, execution)
         identity = _model_identity(info)
@@ -637,8 +532,7 @@ def _run_single(args, suite, get_libero_path, env_type):
     runner = None
     try:
         info = rpc.connect()
-        check_observation_compatibility(info.policy_spec)
-        check_action_compatibility(info.policy_spec)
+        _ADAPTER.validate(info.policy_spec)
         _validate_runtime(info, execution)
         runner = EpisodeRunner(suite, get_libero_path, env_type, rpc, info,
                                execution)

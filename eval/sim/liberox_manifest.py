@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 import re
+
+from wam.eval import (canonical_json, distribution, load_jsonl)
 
 MANIFEST_FORMAT = "wam-liberox-manifest-v1"
 RESULT_FORMAT = "wam-liberox-eval-v1"
@@ -16,11 +17,6 @@ LATENCY_FIELDS = (
     "server_model_milliseconds",
     "server_text_milliseconds",
 )
-
-
-def canonical_json(value):
-    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) +
-            "\n").encode()
 
 
 def manifest_sha256(value):
@@ -189,13 +185,6 @@ def stage_manifest(manifest, source_bddl_root, source_init_root, stage_root,
     return Path(stage_root) / "bddl", Path(stage_root) / "init", selected
 
 
-def load_jsonl(path):
-    if not Path(path).exists():
-        return []
-    with Path(path).open(encoding="utf-8") as stream:
-        return [json.loads(line) for line in stream if line.strip()]
-
-
 def validate_results(results, selected_tasks):
     planned = {(task["bddl_file"], episode)
                for task in selected_tasks
@@ -212,27 +201,6 @@ def validate_results(results, selected_tasks):
         raise ValueError(f"results differ from manifest; missing={missing}, extra={extra}")
 
 
-def _distribution(values):
-    values = sorted(float(value) for value in values)
-    if not values:
-        return {"count": 0}
-
-    def percentile(percent):
-        position = (len(values) - 1) * percent / 100.0
-        lower = int(position)
-        upper = min(lower + 1, len(values) - 1)
-        fraction = position - lower
-        return values[lower] * (1.0 - fraction) + values[upper] * fraction
-
-    return {
-        "count": len(values),
-        "mean": sum(values) / len(values),
-        "p50": percentile(50),
-        "p95": percentile(95),
-        "maximum": values[-1],
-    }
-
-
 def build_summary(manifest, model, results, requests, selected_tasks):
     successes = sum(bool(result["success"]) for result in results)
     return {
@@ -246,7 +214,7 @@ def build_summary(manifest, model, results, requests, selected_tasks):
         "success_rate": successes / len(results) if results else 0.0,
         "request_count": len(requests),
         "latency": {
-            field: _distribution([request[field] for request in requests])
+            field: distribution([request[field] for request in requests])
             for field in LATENCY_FIELDS
         },
     }

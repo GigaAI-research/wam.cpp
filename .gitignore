@@ -51,8 +51,8 @@ venv/
 # Runtime output
 *.log
 MUJOCO_LOG.TXT
-core
-core.*
+/core
+/core.*
 /action*.f32
 /report*.json
 /rollout*.json

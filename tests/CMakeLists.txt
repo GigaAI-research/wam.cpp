@@ -131,6 +131,17 @@ add_test(NAME wam_python_resources
 set_tests_properties(wam_python_resources PROPERTIES
     LABELS "python;artifact"
     ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python")
+add_test(NAME wam_phase8_adapters_eval
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/python/test_phase8.py)
+set_tests_properties(wam_phase8_adapters_eval PROPERTIES
+    LABELS "python;adapter;eval"
+    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python")
+add_test(NAME wam_phase8_source_boundaries
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/python/test_phase8_boundaries.py)
+set_tests_properties(wam_phase8_source_boundaries PROPERTIES
+    LABELS "python;contract;boundary")
 
 add_library(wam_cpp_predict_example OBJECT
     ${PROJECT_SOURCE_DIR}/examples/cpp/predict.cpp)
@@ -491,29 +502,29 @@ if(WAM_BUILD_SERVING AND TARGET wam_proto_descriptor)
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_protocol.py
             --descriptor ${WAM_PROTO_DESCRIPTOR})
     set_tests_properties(wam_rpc_protocol PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python:${PROJECT_SOURCE_DIR}/eval")
 
     add_test(NAME wam_language_provider
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_language_provider.py)
     set_tests_properties(wam_language_provider PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python:${PROJECT_SOURCE_DIR}/eval")
 
     add_test(NAME wam_libero_manifest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_libero_manifest.py)
     set_tests_properties(wam_libero_manifest PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python:${PROJECT_SOURCE_DIR}/eval")
 
     add_test(NAME wam_liberox_adapter
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_liberox_adapter.py)
     set_tests_properties(wam_liberox_adapter PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python:${PROJECT_SOURCE_DIR}/eval")
 
     add_test(NAME wam_liberox_manifest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_liberox_manifest.py)
     set_tests_properties(wam_liberox_manifest PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/eval")
+        ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python:${PROJECT_SOURCE_DIR}/eval")
 endif()

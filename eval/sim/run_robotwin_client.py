@@ -1,4 +1,4 @@
-"""Run the upstream RoboTwin evaluator against the wam.cpp 0.5 RPC server."""
+"""Run the upstream RoboTwin evaluator against the wam.cpp RPC server."""
 
 from __future__ import annotations
 
@@ -16,25 +16,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.rpc import RpcClient
+from wam.adapters.robotwin import ROLE_MAP, RoboTwinAdapter, rgb_u8
+from wam.eval import (ActionChunkExecutor, ResultWriter,
+                      distribution as _distribution)
 
-
-ROLE_MAP = {
-    "observation.images.cam_high": "camera_high",
-    "observation.images.cam_left_wrist": "camera_left_wrist",
-    "observation.images.cam_right_wrist": "camera_right_wrist",
-}
-
-
-def _rgb_u8(value):
-    array = np.asarray(value)
-    if array.ndim != 3 or array.shape[-1] not in (3, 4):
-        raise ValueError(f"RoboTwin image must be HWC RGB/RGBA, got {array.shape}")
-    array = array[..., :3]
-    if np.issubdtype(array.dtype, np.floating):
-        if array.size and float(array.max()) <= 1.5:
-            array = array * 255.0
-        array = np.clip(np.rint(array), 0, 255)
-    return np.ascontiguousarray(array, dtype=np.uint8)
+_rgb_u8 = rgb_u8
 
 
 class RobotwinPolicy:
@@ -43,14 +29,14 @@ class RobotwinPolicy:
         self.rpc = RpcClient(host, port, descriptor, "robotwin")
         info = self.rpc.connect()
         spec = info.policy_spec
-        roles = {view.role for view in spec.images.views}
-        if roles != set(ROLE_MAP.values()):
-            raise RuntimeError(f"server image roles are incompatible: {sorted(roles)}")
-        if spec.state.real_dim != 14 or spec.action.real_dim != 14:
-            raise RuntimeError("RoboTwin requires 14D state and action")
+        self.spec = spec
+        self.adapter = RoboTwinAdapter()
+        self.adapter.validate(spec)
         if not 1 <= execute_steps <= spec.action.horizon:
             raise ValueError(f"execute_steps must be within [1,{spec.action.horizon}]")
         self.execute_steps = execute_steps
+        self.executor = ActionChunkExecutor(
+            execute_steps, lambda chunk: self.adapter.action(chunk, spec))
         self.action_noise = None
         if fixed_action_noise_seed is not None:
             import torch
@@ -65,6 +51,8 @@ class RobotwinPolicy:
         self.episode_request_counts = {}
         self.request_metrics = []
         self.request_log = request_log
+        self.request_writer = (ResultWriter(request_log)
+                               if request_log is not None else None)
 
     def set_episode(self, episode_index):
         self.episode_index = int(episode_index)
@@ -75,9 +63,7 @@ class RobotwinPolicy:
         if self.last_instruction is not None and instruction != self.last_instruction:
             self.rpc.reset()
         self.last_instruction = instruction
-        images = [{"name": target, "data": _rgb_u8(observation[source])}
-                  for source, target in ROLE_MAP.items()]
-        state = np.ascontiguousarray(observation["observation.state"], dtype=np.float32).reshape(-1)
+        images, state = self.adapter.observation(observation, self.spec)
         rpc_start = time.perf_counter()
         action, stats = self.rpc.predict(
             images, state, instruction, action_noise=self.action_noise)
@@ -97,14 +83,18 @@ class RobotwinPolicy:
             "server_timing": server_timing,
         }
         self.request_metrics.append(metric)
-        if self.request_log is not None:
-            with self.request_log.open("a", encoding="utf-8") as output:
-                output.write(json.dumps(metric) + "\n")
-        return {"actions": action[:self.execute_steps],
+        if self.request_writer is not None:
+            self.request_writer.append(metric)
+        self.executor.push(action)
+        actions = []
+        while self.executor.pending:
+            actions.append(self.executor.next())
+        return {"actions": np.asarray(actions, dtype=np.float32),
                 "server_timing": server_timing}
 
     def reset(self, _prompt=""):
         self.rpc.reset()
+        self.executor.reset()
         self.last_instruction = None
 
     def close(self):
@@ -127,6 +117,8 @@ class DonorFastwamPolicy:
         self.episode_request_counts = {}
         self.request_metrics = []
         self.request_log = request_log
+        self.request_writer = (ResultWriter(request_log)
+                               if request_log is not None else None)
 
     def set_episode(self, episode_index):
         self.episode_index = int(episode_index)
@@ -175,9 +167,8 @@ class DonorFastwamPolicy:
             "server_timing": {},
         }
         self.request_metrics.append(metric)
-        if self.request_log is not None:
-            with self.request_log.open("a", encoding="utf-8") as output:
-                output.write(json.dumps(metric) + "\n")
+        if self.request_writer is not None:
+            self.request_writer.append(metric)
         return {"actions": np.stack(actions, axis=0), "server_timing": {}}
 
     def reset(self, _prompt=""):
@@ -208,22 +199,6 @@ def parse_args(argv=None):
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--metrics-output", type=Path)
     return parser.parse_args(argv)
-
-
-def _distribution(values):
-    array = np.asarray(values, dtype=np.float64)
-    if array.size == 0:
-        return {"count": 0}
-    return {
-        "count": int(array.size),
-        "mean": float(array.mean()),
-        "stddev": float(array.std()),
-        "minimum": float(array.min()),
-        "p50": float(np.percentile(array, 50)),
-        "p95": float(np.percentile(array, 95)),
-        "p99": float(np.percentile(array, 99)),
-        "maximum": float(array.max()),
-    }
 
 
 def _latency_distributions(requests):

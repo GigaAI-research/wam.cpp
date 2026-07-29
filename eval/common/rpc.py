@@ -11,6 +11,7 @@ if str(_PYTHON_ROOT) not in sys.path:
 
 from wam.remote import (  # noqa: E402,F401
     Client,
+    RemoteError,
     RpcClient,
     decode_tensor,
     encode_tensor,

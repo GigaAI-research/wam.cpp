@@ -228,10 +228,9 @@ std::string model_metadata_json(const ModelInfo & info,
     output << "{\"runtime_version\":{\"major\":" << WAM_VERSION_MAJOR
            << ",\"minor\":" << WAM_VERSION_MINOR
            << ",\"patch\":" << WAM_VERSION_PATCH
-           << "},\"protocol_version\":{\"major\":0,\"minor\":5}"
+           << "},\"protocol_version\":{\"major\":0,\"minor\":6}"
            << ",\"architecture\":" << quote(info.architecture)
            << ",\"artifact_policy\":" << quote(spec.identity.profile)
-           << ",\"artifact_sha256\":\"\""
            << ",\"artifact_bytes\":" << info.artifact_bytes
            << ",\"backend\":" << quote(backend_name(info.backend))
            << ",\"compute_precision\":" << quote(precision_name(info.compute_precision))

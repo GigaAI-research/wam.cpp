@@ -75,11 +75,14 @@ GWP05 action and preserves the engine's named vision, text, prefill, and decode 
 External GGUF, numerical fixtures, checkpoints, simulator checkouts, and raw rollout results
 remain outside Git.
 
-Phase 7 publishes C ABI v4 and the installable `wam` Python SDK. The current default CPU
-and CUDA 12.4 + cuDNN `sm_80` matrices each pass 41/41 tests; the Runtime-only build with
-GWP05, FastWAM, and Serving disabled passes 27/27. These matrices include pure-C and C++
+Phase 8 publishes C ABI v4, the installable `wam` Python SDK, and the
+`wam.rpc.v06` serving/evaluation stack. The current default CPU and CUDA 12.4 + cuDNN
+`sm_80` matrices each pass 43/43 tests; the Runtime-only build with GWP05, FastWAM, and
+Serving disabled passes 29/29. These matrices include pure-C and C++
 install consumers, wheel build and isolated installation, context-managed native loading,
 structured error ownership, bundle language-resource discovery, and the `wam-predict`
-entry point. See `docs/python-sdk.md`. Real-model cross-language parity remains an opt-in
+and `wam-serve` entry points. The transport-neutral service core, formal RoboTwin/LIBERO/
+LIBERO-X adapters and shared eval utilities are described in `docs/serving-evaluation.md`.
+Real-model cross-language parity remains an opt-in
 external gate because its GGUF, frozen observations, and reference actions are not stored
 in Git.

@@ -15,6 +15,9 @@ sys.path[:0] = [str(Path(__file__).resolve().parent),
                 str(Path(__file__).resolve().parents[1])]
 
 from common.rpc import RpcClient
+from wam.adapters.libero import ACTION_FIELDS, STATE_FIELDS
+from wam.adapters.liberox import LiberoXAdapter
+from wam.eval import ActionChunkExecutor
 from liberox_manifest import (
     ACTION_NOISE_GENERATOR,
     build_manifest,
@@ -28,72 +31,21 @@ from liberox_manifest import (
 )
 
 
-STATE_FIELDS = (
-    "eef.position.x", "eef.position.y", "eef.position.z",
-    "eef.rotation.axis_angle.x", "eef.rotation.axis_angle.y",
-    "eef.rotation.axis_angle.z", "gripper.left", "gripper.right")
-ACTION_FIELDS = (
-    "eef.delta.position.x", "eef.delta.position.y",
-    "eef.delta.position.z", "eef.delta.rotation.axis_angle.x",
-    "eef.delta.rotation.axis_angle.y",
-    "eef.delta.rotation.axis_angle.z", "gripper.command")
-
-
-def check_observation_compatibility(policy_spec):
-    roles = {view.role for view in policy_spec.images.views}
-    if roles != {"scene", "wrist"}:
-        raise RuntimeError(
-            f"LIBERO-X requires scene/wrist image roles, got {sorted(roles)}")
-    if tuple(policy_spec.state.fields) != STATE_FIELDS:
-        raise RuntimeError("LIBERO-X state fields differ from the PolicySpec")
-
-
-def observation_to_policy_observation(observation, policy_spec):
-    check_observation_compatibility(policy_spec)
-    images = [
-        {"name": "scene", "data": np.ascontiguousarray(
-            observation["observation/image"], dtype=np.uint8)},
-        {"name": "wrist", "data": np.ascontiguousarray(
-            observation["observation/wrist_image"], dtype=np.uint8)},
-    ]
-    state = np.ascontiguousarray(
-        observation["observation/state"], dtype=np.float32).reshape(-1)
-    if state.shape != (8,):
-        raise ValueError(f"LIBERO-X state must be 8D, got {state.shape}")
-    return images, state
-
-
-def check_action_compatibility(policy_spec):
-    action = policy_spec.action
-    if tuple(action.fields) != ACTION_FIELDS or action.real_dim != 7:
-        raise RuntimeError("LIBERO-X requires the frozen 7D action contract")
-    if action.representation != "eef_delta_pose" or \
-            action.frame != "robot_base":
-        raise RuntimeError("LIBERO-X requires robot_base eef_delta_pose actions")
-
-
-def policy_action_to_command(action, policy_spec, binarize_gripper=True):
-    check_action_compatibility(policy_spec)
-    command = np.asarray(action, dtype=np.float32).copy()
-    if command.ndim != 2 or command.shape[1] != 7:
-        raise ValueError(f"LIBERO-X action chunk must be [T,7], got {command.shape}")
-    command[:, -1] *= -1.0
-    if binarize_gripper:
-        command[:, -1] = np.sign(command[:, -1])
-    return command
-
-
 class WamLiberoXPolicy:
     def __init__(self, host, port, descriptor, random_seed=7,
-                 binarize_gripper=True):
+                 binarize_gripper=True, execute_steps=None):
         self.rpc = RpcClient(host, port, descriptor, "liberox")
         self.info = self.rpc.connect()
-        check_observation_compatibility(self.info.policy_spec)
-        check_action_compatibility(self.info.policy_spec)
+        self.adapter = LiberoXAdapter(binarize_gripper)
+        self.adapter.validate(self.info.policy_spec)
         if not self.info.capabilities.explicit_action_noise:
             raise RuntimeError("LIBERO-X evaluation requires explicit action noise")
         self.random_seed = int(random_seed)
         self.binarize_gripper = binarize_gripper
+        steps = int(execute_steps or self.info.policy_spec.action.horizon)
+        self.executor = ActionChunkExecutor(
+            steps, lambda chunk: LiberoXAdapter(binarize_gripper).action(
+                chunk, self.info.policy_spec))
         self.last_prompt = None
         self.requests = []
 
@@ -102,7 +54,7 @@ class WamLiberoXPolicy:
         if self.last_prompt is not None and prompt != self.last_prompt:
             self.rpc.reset()
         self.last_prompt = prompt
-        images, state = observation_to_policy_observation(
+        images, state = self.adapter.observation(
             observation, self.info.policy_spec)
         action_spec = self.info.policy_spec.action
         noise = donor_action_noise(
@@ -117,8 +69,11 @@ class WamLiberoXPolicy:
             "server_model_milliseconds": stats.model_milliseconds,
             "server_text_milliseconds": stats.model_text_milliseconds,
         })
-        return {"actions": policy_action_to_command(
-            action, self.info.policy_spec, self.binarize_gripper)}
+        self.executor.push(action)
+        actions = []
+        while self.executor.pending:
+            actions.append(self.executor.next())
+        return {"actions": np.asarray(actions, dtype=np.float32)}
 
     def get_server_metadata(self):
         return {
@@ -129,6 +84,7 @@ class WamLiberoXPolicy:
 
     def reset(self):
         self.rpc.reset()
+        self.executor.reset()
         self.last_prompt = None
 
     def close(self):
@@ -176,7 +132,7 @@ def _model_identity(info):
     return {
         "architecture": info.architecture,
         "artifact_policy": info.artifact_policy,
-        "artifact_sha256": info.artifact_sha256,
+        "artifact_bytes": info.artifact_bytes,
         "profile": info.policy_spec.profile,
         "checkpoint_revision": info.policy_spec.checkpoint_revision,
     }
@@ -307,7 +263,7 @@ def main(argv=None):
         def __init__(self, host, port):
             self.impl = WamLiberoXPolicy(
                 host, port, args.descriptor, args.seed,
-                not args.no_binarize_gripper)
+                not args.no_binarize_gripper, args.replan_steps)
             policy_holder["policy"] = self.impl
 
         def infer(self, observation):

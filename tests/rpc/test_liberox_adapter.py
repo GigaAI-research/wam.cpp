@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+from wam.adapters.liberox import LiberoXAdapter
 
 
 def load_client():
@@ -22,6 +23,7 @@ def load_client():
 
 def run():
     client = load_client()
+    adapter = LiberoXAdapter()
     views = [SimpleNamespace(role="scene"), SimpleNamespace(role="wrist")]
     state = SimpleNamespace(fields=client.STATE_FIELDS)
     action = SimpleNamespace(
@@ -35,14 +37,13 @@ def run():
         "observation/wrist_image": np.ones((224, 224, 3), dtype=np.uint8),
         "observation/state": np.arange(8, dtype=np.float32),
     }
-    images, state_values = client.observation_to_policy_observation(
-        observation, policy_spec)
+    images, state_values = adapter.observation(observation, policy_spec)
     assert [image["name"] for image in images] == ["scene", "wrist"]
     assert state_values.tolist() == list(range(8))
 
     chunk = np.zeros((2, 7), dtype=np.float32)
     chunk[:, -1] = [-0.25, 0.75]
-    command = client.policy_action_to_command(chunk, policy_spec)
+    command = adapter.action(chunk, policy_spec)
     assert command[:, -1].tolist() == [1.0, -1.0]
     assert chunk[:, -1].tolist() == [-0.25, 0.75]
 

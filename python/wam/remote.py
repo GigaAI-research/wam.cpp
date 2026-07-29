@@ -1,4 +1,4 @@
-"""Remote client for the transitional v0.5 protocol used until Phase 8."""
+"""WebSocket client for the wam.rpc.v06 protocol."""
 
 from __future__ import annotations
 
@@ -8,10 +8,18 @@ import time
 import numpy as np
 
 
-PACKAGE = "wam.rpc.v05"
+PACKAGE = "wam.rpc.v06"
 MESSAGE_NAMES = (
     "ClientEnvelope", "ServerEnvelope", "ModelInfo", "PolicySpec",
     "Tensor", "Image", "Prediction")
+
+
+class RemoteError(RuntimeError):
+    def __init__(self, code, message, details, fatal=False):
+        super().__init__(message)
+        self.code = int(code)
+        self.details = details
+        self.fatal = bool(fatal)
 
 
 def load_types(descriptor):
@@ -78,6 +86,8 @@ class Client:
         self.model_info = None
 
     def connect(self):
+        if self.socket is not None:
+            return self.model_info
         from websockets.sync.client import connect
         deadline = time.monotonic() + self.connect_timeout
         while True:
@@ -92,7 +102,7 @@ class Client:
         request = self.types["ClientEnvelope"]()
         request.request_id = 0
         request.hello.protocol_major = 0
-        request.hello.protocol_minor = 5
+        request.hello.protocol_minor = 6
         request.hello.environment_id = self.environment_id
         response = self._exchange(request)
         if response.WhichOneof("payload") != "hello":
@@ -114,12 +124,17 @@ class Client:
             raise RuntimeError(f"response id {response.request_id} != {request.request_id}")
         return response
 
-    @staticmethod
-    def _raise_response(response):
+    def _raise_response(self, response):
         if response.WhichOneof("payload") == "error":
-            raise RuntimeError(
-                f"RPC error code={response.error.code} field={response.error.field}: "
-                f"{response.error.message}")
+            error = RemoteError(
+                response.error.code, response.error.message,
+                [{"field": item.field, "reason": item.reason}
+                 for item in response.error.details],
+                response.error.fatal)
+            if error.fatal and self.socket is not None:
+                self.socket.close()
+                self.socket = None
+            raise error
         raise RuntimeError(f"unexpected RPC response: {response.WhichOneof('payload')}")
 
     def predict(self, images, state, instruction, action_noise=None):

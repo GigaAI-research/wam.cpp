@@ -1,12 +1,12 @@
 from .errors import ErrorCode, WamError
 from .local import Model, Pipeline, Prediction, RuntimeConfig, Session, SessionConfig
 from .language import PreparedLanguage, TokenLanguageProvider, WanUmt5EmbeddingProvider
-from .remote import Client
+from .remote import Client, RemoteError
 from .resources import LanguageResourceError, LanguageResources
 
 __all__ = [
     "Client", "ErrorCode", "LanguageResourceError", "LanguageResources",
-    "Model", "Pipeline", "Prediction", "PreparedLanguage", "RuntimeConfig", "Session",
+    "Model", "Pipeline", "Prediction", "PreparedLanguage", "RemoteError", "RuntimeConfig", "Session",
     "TokenLanguageProvider", "WanUmt5EmbeddingProvider",
     "SessionConfig", "WamError",
 ]

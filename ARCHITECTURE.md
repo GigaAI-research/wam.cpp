@@ -217,7 +217,7 @@ environment/profile compatibility 的权威判断只在 server 侧执行，clien
 - 签名 manifest、artifact authenticity 或供应链签名验证；
 - 模型每次启动时为了计算 hash 而完整扫描所有 weight payload。
 
-现有 `ModelInfo.artifact_sha256` 和 Proto 字段为兼容保留，0.5 返回空字符串。server、cache、replay 和 adapter compatibility 不能依赖该字段。需要记录 artifact identity 时，0.5 使用 architecture、policy profile、checkpoint revision、artifact schema version 和文件大小；这不是字节级唯一身份，但足以满足当前开发和仿真范围。
+0.6 的 `wam.rpc.v06` 已删除 `ModelInfo.artifact_sha256` 并保留字段号 3，禁止复用。server、cache、replay 和 adapter compatibility 不能依赖全文件 hash；需要记录 artifact identity 时使用 architecture、policy profile、checkpoint revision、artifact schema version 和文件大小。
 
 不负责：
 
@@ -1240,7 +1240,7 @@ message RpcError {
 
 - 为 `ModelInfo` 添加 `PolicySpec` 及其子 message。
 - 保留现有字段号，新增字段只能使用新的编号。
-- 保留现有 `artifact_sha256` 字段号但返回空字符串，不能删除、复用或作为客户端启动条件。
+- `wam.rpc.v06` 保留旧 `artifact_sha256` 的字段号 3 但不再声明该字段，不能复用或作为客户端启动条件。
 - `Prediction.action` 继续通过 Tensor 自描述 shape，不新增固定 action shape 字段。
 - `Image.name` 继续承载逻辑角色。
 - C++ `Inputs.action_noise` 在 wire request 中同样使用 `action_noise`，不保留含义不明确的通用 `noise` 名称。

@@ -12,6 +12,7 @@ import tempfile
 from types import SimpleNamespace
 
 import numpy as np
+from wam.adapters.libero import LiberoAdapter
 
 
 def load_client():
@@ -85,7 +86,7 @@ def run():
         fields=client.ACTION_FIELDS, real_dim=7,
         representation="eef_delta_pose", frame="robot_base")
     spec = SimpleNamespace(action=action)
-    command = client.policy_action_to_command(
+    command = LiberoAdapter().action(
         np.asarray([0, 0, 0, 0, 0, 0, 0.75], np.float32), spec)
     assert command[-1] == -1.0
 

@@ -29,6 +29,8 @@ def main():
                         "assert wam.RuntimeConfig().backend == 'automatic'"], check=True)
         subprocess.run([str(environment / "bin" / "wam-predict"), "--help"],
                        check=True, stdout=subprocess.DEVNULL)
+        subprocess.run([str(environment / "bin" / "wam-serve"), "--help"],
+                       check=True, stdout=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

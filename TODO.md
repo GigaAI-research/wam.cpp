@@ -624,6 +624,23 @@ Phase 7 尚未执行的外部门禁：
 
 验收：RPC malformed request、握手、reset、关闭、错误映射和并发能力测试通过；本地与远程 Prediction 一致；三个环境至少完成一个固定种子 smoke episode。
 
+Phase 8 实施结果：
+
+- Proto 已破坏式升级为 `wam.rpc.v06`。旧 `artifact_sha256` 字段被删除并保留字段号 3，RPC error 改为稳定 code、message、fatal 与 repeated field/reason details；正式 `Client` 同步升级到 v0.6，并以 `RemoteError` 暴露结构化错误与连接是否可恢复。
+- 已建立 transport-neutral `ServiceCore`/`ServiceConnection`，独立管理精确协议握手、连续 request id、Model Session、predict/reset/close、语言输入组装、原生错误映射和全局并发门禁。`WebSocketTransport` 只负责二进制帧、大小限制、Protobuf parse/serialize 和关闭码；core 可在不启动 socket 的测试中直接调用。
+- 已增加正式 `wam-serve` console script。通用 server 根据 `--environment` 选择 contract，在创建 Session 和第一个 episode 前完成 PolicySpec compatibility check；三个旧环境 server 入口只导入正式 contract，不再复制 state/action/camera 字段。
+- 已建立 `wam.adapters`，分别提供 `RoboTwinAdapter`、`LiberoAdapter` 和 `LiberoXAdapter`。环境原始 image/state key、四元数转换、图像方向和 controller gripper 语义均从 runner 移出；adapter 只执行 simulator/controller 语义，不执行 checkpoint resize、normalization 或 action recovery。
+- 已建立 `wam.eval` 的 `ActionChunkExecutor`、canonical manifest helper、Metrics/distribution、atomic JSON/JSONL/ResultWriter 和可选 VideoWriter。LIBERO/LIBERO-X/RoboTwin runner 已复用这些组件；ActionChunkExecutor 统一 horizon 截断、queue、reset、Gym/Gymnasium done/truncated 和 action transform shape 约束。
+- `eval/common/server.py` 已从同时承担 transport、协议状态机、推理和 CLI 的大文件缩减为正式 serving 模块的兼容 facade；native、language、RPC、server 四个 `eval/common` 文件均只保留正式 `wam` 包兼容导出。源码边界测试禁止恢复 v0.5 wire、artifact SHA 字段、runner 内 observation/action 转换、architecture 分支和 server contract 复制。
+- 默认测试覆盖 malformed Protobuf/text frame、错误 request id、错误协议/环境、握手、recoverable/fatal error、reset、close、Session 释放、正式 Client error mapping、core/WebSocket Prediction 一致性，以及 `concurrent_sessions=false` 时跨连接推理串行化。RoboTwin、LIBERO 和 LIBERO-X 以固定 seed 合成 observation/action 完成 adapter -> ActionChunkExecutor -> step smoke。
+- 本地验证结果：默认 CPU 43/43、关闭 GWP05/FastWAM/Serving 的 Runtime-only 29/29、CUDA 12.4 + cuDNN + `sm_80` 43/43；wheel 隔离安装同时验证 `wam-predict` 与 `wam-serve` console script。
+
+Phase 8 尚未执行的外部门禁：
+
+- 当前工作区没有真实 RoboTwin、LIBERO、LIBERO-X simulator checkout、GGUF 和固定 episode 资产，因此三个环境的真实 simulator smoke 尚未执行；默认门禁只证明固定 seed 合成 adapter/eval 流程，不将其表述为 simulator 成功率或模型数值验证。
+- 真实 GWP05/FastWAM 的 C++ direct、Python local 与 WebSocket remote Prediction parity 仍需 Phase 5/6 的外部 GGUF、observation/noise 和 reference action。默认测试使用同一 deterministic fake Session 验证 core 与正式 Client 序列化路径输出完全一致。
+- RoboTwin 和 LIBERO-X 上游 evaluator 源码未包含在当前工作区，现有版本没有可审计的 policy factory 参数；外部 runner 仍需在启动边界注入上游 `WebsocketClientPolicy/eval_func`。环境转换、协议和 eval 公共逻辑已经移出该注入块，但在取得固定上游 revision 并确认正式扩展点前，不把“删除全部 monkeypatch”标记为完成。
+
 ### Phase 9：文档、打包与发布验收
 
 - 重写 README，提供五分钟构建、inspect、local predict 和 serve 流程。
