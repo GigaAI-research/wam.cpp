@@ -23,7 +23,7 @@ void validate_state_input(const TensorView & state, const StateSpec & spec) {
                     {{"state.layout", "expected D or empty"}});
     }
     (void) copy_f32_tensor(
-        state, {{static_cast<std::int64_t>(spec.real_dim)}}, "state");
+        state, {static_cast<std::int64_t>(spec.real_dim)}, "state");
 }
 
 std::vector<float> read_state_f32(const TensorView & state) {
@@ -32,7 +32,7 @@ std::vector<float> read_state_f32(const TensorView & state) {
                     "state tensor rank is invalid",
                     {{"state", "expected rank one"}});
     }
-    return copy_f32_tensor(state, {state.shape}, "state");
+    return copy_f32_tensor(state, state.shape, "state");
 }
 
 std::vector<float> pad_state(const std::vector<float> & state,

@@ -29,15 +29,12 @@ std::size_t checked_numel(const std::vector<std::int64_t> & shape,
 
 std::vector<float> copy_f32_tensor(
     const TensorView & tensor,
-    const std::vector<std::vector<std::int64_t>> & allowed_shapes,
+    const std::vector<std::int64_t> & expected_shape,
     const std::string & field) {
-    bool shape_valid = false;
-    for (const std::vector<std::int64_t> & shape : allowed_shapes) {
-        shape_valid = shape_valid || tensor.shape == shape;
-    }
     const std::size_t elements = checked_numel(tensor.shape, field);
     if (tensor.data == nullptr || tensor.dtype != DType::f32 ||
-        tensor.byte_order != ByteOrder::little || !shape_valid ||
+        tensor.byte_order != ByteOrder::little ||
+        tensor.shape != expected_shape ||
         elements > std::numeric_limits<std::size_t>::max() / sizeof(float) ||
         tensor.byte_size != elements * sizeof(float)) {
         throw Error(ErrorCode::invalid_argument, "tensor contract is invalid",

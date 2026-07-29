@@ -29,8 +29,8 @@ std::vector<float> prepare_action_noise(const TensorView & explicit_noise,
         }
         return copy_f32_tensor(
             explicit_noise,
-            {{static_cast<std::int64_t>(spec.horizon),
-              static_cast<std::int64_t>(spec.model_dim)}},
+            {static_cast<std::int64_t>(spec.horizon),
+             static_cast<std::int64_t>(spec.model_dim)},
             "action_noise");
     }
     if (spec.horizon == 0 || spec.model_dim == 0 ||

@@ -21,7 +21,7 @@ int main() {
     tensor.dtype = wam::DType::f32;
     tensor.shape = {2};
     tensor.byte_order = wam::ByteOrder::little;
-    require(wam::internal::policy::copy_f32_tensor(tensor, {{2}}, "value") ==
+    require(wam::internal::policy::copy_f32_tensor(tensor, {2}, "value") ==
                 source,
             "unaligned F32 tensor copy changed");
 
@@ -29,7 +29,7 @@ int main() {
     require_error(
         [&] {
             (void) wam::internal::policy::copy_f32_tensor(
-                tensor, {{2}}, "value");
+                tensor, {2}, "value");
         },
         wam::ErrorCode::invalid_argument, "unexpected tensor shape");
     tensor.shape = {2};
@@ -37,7 +37,7 @@ int main() {
     require_error(
         [&] {
             (void) wam::internal::policy::copy_f32_tensor(
-                tensor, {{2}}, "value");
+                tensor, {2}, "value");
         },
         wam::ErrorCode::invalid_argument, "wrong tensor byte order");
 
@@ -48,7 +48,7 @@ int main() {
     require_error(
         [&] {
             (void) wam::internal::policy::copy_f32_tensor(
-                tensor, {{2}}, "value");
+                tensor, {2}, "value");
         },
         wam::ErrorCode::invalid_argument, "non-finite tensor payload");
     return 0;
