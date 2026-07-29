@@ -73,14 +73,15 @@ def run():
     else:
         raise AssertionError("manifest must require explicit action noise")
 
-    first_noise = client.donor_action_noise(42, 32, 7)
-    repeated_noise = client.donor_action_noise(42, 32, 7)
-    assert first_noise.dtype == np.float32
-    assert np.array_equal(first_noise, repeated_noise)
-    assert np.array_equal(first_noise.reshape(-1)[:8], np.asarray([
-        1.9296875, 1.484375, 0.90234375, -2.109375,
-        0.6796875, -1.234375, -0.04296875, -1.6015625,
-    ], dtype=np.float32))
+    if importlib.util.find_spec("torch") is not None:
+        first_noise = client.donor_action_noise(42, 32, 7)
+        repeated_noise = client.donor_action_noise(42, 32, 7)
+        assert first_noise.dtype == np.float32
+        assert np.array_equal(first_noise, repeated_noise)
+        assert np.array_equal(first_noise.reshape(-1)[:8], np.asarray([
+            1.9296875, 1.484375, 0.90234375, -2.109375,
+            0.6796875, -1.234375, -0.04296875, -1.6015625,
+        ], dtype=np.float32))
 
     action = SimpleNamespace(
         fields=client.ACTION_FIELDS, real_dim=7,
