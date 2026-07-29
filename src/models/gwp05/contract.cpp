@@ -1,4 +1,4 @@
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 
 #include "artifact/gguf_reader.h"
 #include "artifact/tensor_spec.h"
@@ -284,7 +284,7 @@ policy::PolicySpec read_legacy_policy_spec(const GgufReader & reader) {
     return spec;
 }
 
-void validate_artifact(const ArtifactContract & artifact,
+void validate_contract(const Gwp05Contract & artifact,
                        const policy::PolicySpec & policy_spec) {
     if (artifact.reader == nullptr) {
         throw Error(ErrorCode::internal,
@@ -339,14 +339,14 @@ void validate_artifact(const ArtifactContract & artifact,
     }
 }
 
-std::shared_ptr<const ArtifactContract> load_artifact(
+std::shared_ptr<const Gwp05Contract> load_contract(
     std::shared_ptr<GgufReader> reader,
     const policy::PolicySpec & policy_spec) {
     if (reader == nullptr) {
         throw Error(ErrorCode::internal,
                     "cannot load GWP artifact from a null GGUF reader");
     }
-    auto artifact = std::make_shared<ArtifactContract>();
+    auto artifact = std::make_shared<Gwp05Contract>();
     artifact->reader = std::move(reader);
     artifact->geometry = read_geometry(*artifact->reader);
     artifact->geometry.state_dim =
@@ -366,9 +366,13 @@ std::shared_ptr<const ArtifactContract> load_artifact(
     artifact->geometry.action_chunk =
         static_cast<std::uint32_t>(policy_spec.action.horizon);
     artifact->conversion_policy = read_conversion_policy(*artifact->reader);
+    artifact->vae_latents_mean =
+        artifact->reader->optional_f32_array("gwp05.vae_latents_mean");
+    artifact->vae_latents_std =
+        artifact->reader->optional_f32_array("gwp05.vae_latents_std");
     artifact->legacy_policy_spec =
         !artifact->reader->has("wam.artifact_schema_version");
-    validate_artifact(*artifact, policy_spec);
+    validate_contract(*artifact, policy_spec);
 
     try {
         artifact->sequence_geometry = semantics::resolve_sequence_geometry({
@@ -393,6 +397,22 @@ std::shared_ptr<const ArtifactContract> load_artifact(
                     error.details());
     }
     return artifact;
+}
+
+void validate_runtime_contract(const Gwp05Contract & contract) {
+    if (contract.vae_latents_mean.size() != contract.geometry.vae_z_dim ||
+        contract.vae_latents_std.size() != contract.geometry.vae_z_dim) {
+        incompatible("GWP VAE statistics have invalid dimensions",
+                     "gwp05.vae_latents_mean/std", "size mismatch");
+    }
+    if (std::any_of(
+            contract.vae_latents_std.begin(), contract.vae_latents_std.end(),
+            [](float value) {
+                return !(value > 0.0F) || !std::isfinite(value);
+            })) {
+        incompatible("GWP VAE latent standard deviation is invalid",
+                     "gwp05.vae_latents_std", "non-positive or non-finite");
+    }
 }
 
 } // namespace wam::internal::gwp05

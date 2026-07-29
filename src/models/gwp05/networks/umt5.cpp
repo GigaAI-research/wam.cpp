@@ -1,11 +1,13 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/networks/umt5.h"
+#include "models/gwp05/resources.h"
+#include "models/gwp05/runtime.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
 
 std::vector<float> timestep_embedding(float timestep, int64_t dim) {
     const int64_t half = dim / 2;
@@ -81,7 +83,7 @@ ggml_tensor * build_attention(
         ctx, output_weight, output_bias, attended, use_bf16_value_output);
 }
 
-bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
+bool validate_prompt_mask(const PipelineInputsView & in, int & valid_tokens) {
     if (!in.attention_mask && in.attention_mask_n != 0) {
         return false;
     }
@@ -112,12 +114,12 @@ bool validate_prompt_mask(const EngineInputsView & in, int & valid_tokens) {
     return true;
 }
 
-std::vector<float> run_t5(Gwp05ModelArch & model, const EngineInputsView & in) {
-    if (!component_is_loaded(model, WeightComponent::t5)) {
+std::vector<float> run_umt5(ExecutionState & model, const PipelineInputsView & in) {
+    if (!component_is_loaded(model, WeightComponent::umt5)) {
         logf(model, LogLevel::error, "gwp05: T5 requested while its weights are not resident");
         return {};
     }
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     if (!in.lang_tokens || in.n_lang < 1 || in.n_lang > cfg.n_lang) {
         logf(model, LogLevel::error, "gwp05: lang token count %d outside [1,%lld]",
                      in.n_lang, static_cast<long long>(cfg.n_lang));
@@ -206,4 +208,4 @@ std::vector<float> run_t5(Gwp05ModelArch & model, const EngineInputsView & in) {
     return output;
 }
 
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

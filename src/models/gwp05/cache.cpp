@@ -1,15 +1,70 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/cache.h"
+#include "models/gwp05/networks/mot.h"
+#include "models/gwp05/runtime.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
 
-bool ensure_prefix_storage(Gwp05ModelArch & model) {
+std::vector<std::int32_t> ExecutionState::prompt_mask(
+    const PipelineInputsView & input) const {
+    if (input.attention_mask && input.attention_mask_n == input.n_lang) {
+        return {input.attention_mask,
+                input.attention_mask + input.attention_mask_n};
+    }
+    return std::vector<std::int32_t>(
+        static_cast<std::size_t>(input.n_lang), 1);
+}
+
+bool ExecutionState::get_cached_prompt(
+    const PipelineInputsView & input, std::vector<float> & output) {
+    if (!prompt_cache_limit || !input.lang_tokens || input.n_lang < 1) {
+        return false;
+    }
+    const std::vector<std::int32_t> mask = prompt_mask(input);
+    for (auto it = prompt_cache.begin(); it != prompt_cache.end(); ++it) {
+        if (it->tokens.size() != static_cast<std::size_t>(input.n_lang) ||
+            it->mask != mask ||
+            !std::equal(it->tokens.begin(), it->tokens.end(),
+                        input.lang_tokens)) {
+            continue;
+        }
+        output = it->embedding;
+        prompt_cache.splice(prompt_cache.begin(), prompt_cache, it);
+        ++prompt_cache_hits;
+        return true;
+    }
+    ++prompt_cache_misses;
+    return false;
+}
+
+void ExecutionState::put_cached_prompt(
+    const PipelineInputsView & input,
+    const std::vector<float> & embedding) {
+    if (!prompt_cache_limit) return;
+    PromptCacheEntry entry;
+    entry.tokens.assign(input.lang_tokens,
+                        input.lang_tokens + input.n_lang);
+    entry.mask = prompt_mask(input);
+    entry.embedding = embedding;
+    prompt_cache.push_front(std::move(entry));
+    while (prompt_cache.size() > prompt_cache_limit) prompt_cache.pop_back();
+}
+
+std::size_t ExecutionState::prompt_cache_embedding_bytes() const {
+    std::size_t bytes = 0;
+    for (const PromptCacheEntry & entry : prompt_cache) {
+        bytes += entry.embedding.size() * sizeof(float);
+    }
+    return bytes;
+}
+
+bool ensure_prefix_storage(ExecutionState & model) {
     if (model.prefix_storage) return true;
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     model.prefix_storage = std::make_unique<PrefixStorage>();
     PrefixStorage & storage = *model.prefix_storage;
     ggml_init_params params{};
@@ -59,7 +114,7 @@ bool ensure_prefix_storage(Gwp05ModelArch & model) {
     return true;
 }
 
-bool update_projected_prompt_cache(Gwp05ModelArch & model,
+bool update_projected_prompt_cache(ExecutionState & model,
                                    const std::vector<float> & prompt) {
     if (!cross_request_prompt_cache_enabled(model)) return true;
     const auto begin = std::chrono::steady_clock::now();
@@ -80,7 +135,7 @@ bool update_projected_prompt_cache(Gwp05ModelArch & model,
         model.prompt_projection_graph = std::make_unique<PromptProjectionGraph>();
     }
     PromptProjectionGraph & graph = *model.prompt_projection_graph;
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     if (!graph.ctx) {
         ggml_init_params params{};
         params.mem_size = 64u * 1024u * 1024u;
@@ -145,12 +200,12 @@ bool update_projected_prompt_cache(Gwp05ModelArch & model,
     return true;
 }
 
-bool build_prefix_cache(Gwp05ModelArch & model,
+bool build_prefix_cache(ExecutionState & model,
                         const std::vector<float> & state,
                         const std::vector<float> & reference,
                         const std::vector<float> & prompt) {
     NativeActionRegion native_region(model);
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t visual_tokens = cfg.n_img;
     const int64_t prefix_tokens = visual_tokens + 1;
     const int64_t latent_width = cfg.image_width / 16;
@@ -493,4 +548,4 @@ bool build_prefix_cache(Gwp05ModelArch & model,
     return true;
 }
 
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

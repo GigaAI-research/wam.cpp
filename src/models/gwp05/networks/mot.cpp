@@ -1,6 +1,18 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/networks/mot.h"
+#include "models/gwp05/runtime.h"
 
-namespace wam::internal::gwp05::engine {
+#include <cmath>
+
+namespace wam::internal::gwp05 {
+
+NativeActionRegion::NativeActionRegion(ExecutionState & state_)
+    : state(state_), previous(state.building_native_action) {
+    state.building_native_action = native_bf16(state);
+}
+
+NativeActionRegion::~NativeActionRegion() {
+    state.building_native_action = previous;
+}
 
 ggml_tensor * embodiment_weight(ggml_context * ctx, ggml_tensor * weight,
                                 int64_t input_dim, int64_t output_dim,
@@ -17,9 +29,9 @@ ggml_tensor * embodiment_bias(ggml_context * ctx, ggml_tensor * bias,
         ctx, bias, output_dim, static_cast<size_t>(embodiment) * bias->nb[1]);
 }
 
-ggml_tensor * action_encoder(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * action_encoder(ggml_context * ctx, ExecutionState & model,
                              const std::string & name, ggml_tensor * input) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const std::string prefix = "gwp." + name;
     const bool use_bf16 = bf16_projection_activations(model);
     ggml_tensor * hidden = linear_with_activation(
@@ -37,9 +49,9 @@ ggml_tensor * action_encoder(ggml_context * ctx, Gwp05ModelArch & model,
                   model.weight(prefix + ".out_proj.bias"), hidden, use_bf16);
 }
 
-ggml_tensor * action_decoder(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * action_decoder(ggml_context * ctx, ExecutionState & model,
                              ggml_tensor * input) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const std::string prefix = "gwp.action_decoder";
     const bool use_bf16 = bf16_projection_activations(model);
     ggml_tensor * hidden = linear_with_activation(
@@ -58,7 +70,7 @@ ggml_tensor * action_decoder(ggml_context * ctx, Gwp05ModelArch & model,
         hidden, use_bf16);
 }
 
-ConditionOutput build_condition(ggml_context * ctx, Gwp05ModelArch & model,
+ConditionOutput build_condition(ggml_context * ctx, ExecutionState & model,
                                 const std::string & component,
                                 ggml_tensor * time_frequencies,
                                 ggml_tensor * prompt,
@@ -91,9 +103,9 @@ ConditionOutput build_condition(ggml_context * ctx, Gwp05ModelArch & model,
     return output;
 }
 
-CrossKv build_cross_kv(ggml_context * ctx, Gwp05ModelArch & model,
+CrossKv build_cross_kv(ggml_context * ctx, ExecutionState & model,
                        const std::string & prefix, ggml_tensor * encoder_hidden) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const std::string cross = prefix + ".attn2";
     const bool use_bf16_qkv = bf16_qkv_activations(model);
     CrossKv output;
@@ -127,7 +139,7 @@ ggml_tensor * modulation_part(ggml_context * ctx, ggml_tensor * combined,
         static_cast<size_t>(index) * combined->nb[1]);
 }
 
-ggml_tensor * modulation_add(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * modulation_add(ggml_context * ctx, ExecutionState & model,
                              ggml_tensor * a, ggml_tensor * b) {
     const ggml_type target = unsafe_fast_native_bf16(model)
         ? GGML_TYPE_BF16
@@ -151,7 +163,7 @@ ggml_tensor * modulated_norm(ggml_context * ctx, ggml_tensor * input,
     return ggml_add(ctx, ggml_add(ctx, normalized, ggml_mul(ctx, normalized, scale)), shift);
 }
 
-ggml_tensor * gated_residual(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * gated_residual(ggml_context * ctx, ExecutionState & model,
                              ggml_tensor * hidden, ggml_tensor * branch,
                              ggml_tensor * gate) {
     if (!native_action_region(model)) {
@@ -194,7 +206,7 @@ ggml_tensor * apply_visual_rope(ggml_context * ctx, ggml_tensor * input,
     return ggml_cont(ctx, result);
 }
 
-ExpertQkv expert_qkv(ggml_context * ctx, Gwp05ModelArch & model,
+ExpertQkv expert_qkv(ggml_context * ctx, ExecutionState & model,
                      const std::string & prefix, ggml_tensor * input,
                      ggml_tensor * scale, ggml_tensor * shift,
                      ggml_tensor * action_positions,
@@ -202,7 +214,7 @@ ExpertQkv expert_qkv(ggml_context * ctx, Gwp05ModelArch & model,
                      ggml_tensor * visual_height,
                      ggml_tensor * visual_width,
                      bool visual) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t tokens = input->ne[1];
     ggml_tensor * normalized = modulated_norm(ctx, input, scale, shift, cfg.norm_eps);
     const bool use_bf16_qkv = bf16_qkv_activations(model);
@@ -254,7 +266,7 @@ ExpertQkv expert_qkv(ggml_context * ctx, Gwp05ModelArch & model,
 }
 
 ggml_tensor * native_attention_context(ggml_context * ctx,
-                                       Gwp05ModelArch & model,
+                                       ExecutionState & model,
                                        ggml_tensor * q,
                                        ggml_tensor * k,
                                        ggml_tensor * transposed_v,
@@ -268,7 +280,7 @@ ggml_tensor * native_attention_context(ggml_context * ctx,
     return nullptr;
 }
 
-ggml_tensor * expert_cross_ffn(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * expert_cross_ffn(ggml_context * ctx, ExecutionState & model,
                                const std::string & prefix,
                                ggml_tensor * hidden,
                                ggml_tensor * encoder_hidden,
@@ -277,7 +289,7 @@ ggml_tensor * expert_cross_ffn(ggml_context * ctx, Gwp05ModelArch & model,
                                ggml_tensor * gate,
                                ggml_tensor * cached_k,
                                ggml_tensor * cached_v) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const std::string cross = prefix + ".attn2";
     ggml_tensor * normalized = layer_norm(
         ctx, hidden, model.weight(prefix + ".norm2.weight"),
@@ -335,11 +347,11 @@ ggml_tensor * expert_cross_ffn(ggml_context * ctx, Gwp05ModelArch & model,
 
 
 CachedActionBody build_cached_action_body(
-        ggml_context * ctx, Gwp05ModelArch & model, ggml_tensor * action_input,
+        ggml_context * ctx, ExecutionState & model, ggml_tensor * action_input,
         ggml_tensor * frequency_input, ggml_tensor * positions, ggml_tensor * dt_input,
         ggml_tensor * prompt_input, bool keep_debug) {
     NativeActionRegion native_region(model);
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t tokens = cfg.action_chunk;
     const int64_t condition_tokens = frequency_input->ne[1];
     const bool cache_action_prompt = action_prompt_cache_enabled(model);
@@ -474,7 +486,7 @@ CachedActionBody build_cached_action_body(
     return output;
 }
 
-bool run_mot_step(Gwp05ModelArch & model,
+bool run_mot_step(ExecutionState & model,
                   const std::vector<float> & state,
                   const std::vector<float> & action,
                   const std::vector<float> & reference,
@@ -486,7 +498,7 @@ bool run_mot_step(Gwp05ModelArch & model,
                   std::vector<float> * prediction_output,
                   std::vector<float> * action_output_host) {
     NativeActionRegion native_region(model);
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t action_tokens = cfg.action_chunk + 1;
     const int64_t visual_tokens = cfg.n_img;
     const int64_t total_tokens = action_tokens + visual_tokens;
@@ -803,4 +815,4 @@ bool run_mot_step(Gwp05ModelArch & model,
     if (!model.tuning.graph_cache) model.mot_graph.reset();
     return true;
 }
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

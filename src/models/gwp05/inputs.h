@@ -1,6 +1,6 @@
 #pragma once
 
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 #include "runtime/runtime_types.h"
 #include "policy/observation_processor.h"
 #include "wam/observation.h"
@@ -26,7 +26,7 @@ struct PreparedInputs {
 using CoreAction = runtime::CoreAction;
 
 PreparedInputs prepare_inputs(const Observation & inputs,
-                              const ArtifactContract & artifact,
+                              const Gwp05Contract & contract,
                               const policy::PolicySpec & policy_spec,
                               LanguageRuntimeMode language_mode,
                               std::mt19937 & session_rng,

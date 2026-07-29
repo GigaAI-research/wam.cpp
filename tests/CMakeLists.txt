@@ -115,7 +115,7 @@ set_tests_properties(wam_install_consumer PROPERTIES
 
 if(WAM_BUILD_GWP05)
     wam_add_test(wam_gwp05_artifact integration/gwp05_artifact.cpp)
-    wam_add_test(wam_gwp05_engine unit/gwp05_engine.cpp)
+    wam_add_test(wam_gwp05_pipeline unit/gwp05_pipeline.cpp)
     wam_add_test(wam_gwp05_semantics unit/gwp05_semantics.cpp)
     wam_add_test(wam_gwp05_inputs unit/gwp05_inputs.cpp)
 
@@ -149,14 +149,14 @@ if(WAM_BUILD_GWP05)
     target_compile_options(wam_gwp05_robotwin_parity PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
 
-    add_executable(wam_gwp05_engine_reference
-        integration/gwp05_engine_reference.cpp)
-    target_link_libraries(wam_gwp05_engine_reference PRIVATE wam::core)
-    target_include_directories(wam_gwp05_engine_reference PRIVATE
+    add_executable(wam_gwp05_pipeline_reference
+        integration/gwp05_pipeline_reference.cpp)
+    target_link_libraries(wam_gwp05_pipeline_reference PRIVATE wam::core)
+    target_include_directories(wam_gwp05_pipeline_reference PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/src)
-    target_compile_features(wam_gwp05_engine_reference PRIVATE cxx_std_17)
-    target_compile_options(wam_gwp05_engine_reference PRIVATE
+    target_compile_features(wam_gwp05_pipeline_reference PRIVATE cxx_std_17)
+    target_compile_options(wam_gwp05_pipeline_reference PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
 
     if(WAM_TEST_GWP05_REAL_GGUF)
@@ -255,18 +255,18 @@ if(WAM_BUILD_GWP05)
                 message(FATAL_ERROR "${path} must name an existing absolute path")
             endif()
         endforeach()
-        add_test(NAME wam_gwp05_engine_reference
-            COMMAND wam_gwp05_engine_reference
+        add_test(NAME wam_gwp05_pipeline_reference
+            COMMAND wam_gwp05_pipeline_reference
                 "${WAM_TEST_GWP05_REAL_GGUF}"
                 "${WAM_TEST_GWP05_MATERIALIZED_INPUT_DIR}"
                 "${WAM_TEST_GWP05_STAGE_ROOT}")
-        set_tests_properties(wam_gwp05_engine_reference PROPERTIES
-            LABELS "integration;gwp05;engine;parity;external"
+        set_tests_properties(wam_gwp05_pipeline_reference PROPERTIES
+            LABELS "integration;gwp05;pipeline;parity;external"
             TIMEOUT 900
             RUN_SERIAL TRUE)
     else()
         message(STATUS
-            "wam: skipping Slice 4B engine parity gate; set real GGUF, materialized input, and stage root")
+            "wam: skipping GWP05 pipeline parity gate; set real GGUF, materialized input, and stage root")
     endif()
 endif()
 
@@ -362,7 +362,7 @@ target_include_directories(wam_policy_ops_unit PRIVATE ${PROJECT_SOURCE_DIR}/src
 
 if(WAM_BUILD_GWP05)
     target_include_directories(wam_gwp05_semantics PRIVATE ${PROJECT_SOURCE_DIR}/src)
-    target_include_directories(wam_gwp05_engine PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_include_directories(wam_gwp05_pipeline PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_include_directories(wam_gwp05_inputs PRIVATE ${PROJECT_SOURCE_DIR}/src)
 endif()
 
@@ -385,7 +385,7 @@ endif()
 if(WAM_BUILD_GWP05)
     foreach(target IN ITEMS
             wam_gwp05_artifact
-            wam_gwp05_engine
+            wam_gwp05_pipeline
             wam_gwp05_semantics
             wam_gwp05_inputs)
         target_link_libraries(${target} PRIVATE wam_test_fixtures)

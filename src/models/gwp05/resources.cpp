@@ -1,17 +1,29 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/runtime.h"
+#include "models/gwp05/resources.h"
 
+#include "artifact/gguf_reader.h"
 #include "wam/error.h"
 
 #include <chrono>
 #include <cstring>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
+
+ggml_tensor * ExecutionState::weight(const std::string & name) const {
+    const auto it = weights.find(compact_tensor_name(name));
+    if (it != weights.end()) return it->second;
+    if (logger) {
+        logger->logf(LogLevel::error,
+                     "gwp05: internal missing weight %s", name.c_str());
+    }
+    return nullptr;
+}
 
 const char * component_prefix(WeightComponent component) {
     switch (component) {
         case WeightComponent::mot: return "gwp.";
-        case WeightComponent::t5: return "t5.";
-        case WeightComponent::vae: return "vae.";
+        case WeightComponent::umt5: return "t5.";
+        case WeightComponent::vision_vae: return "vae.";
     }
     return "";
 }
@@ -19,17 +31,17 @@ const char * component_prefix(WeightComponent component) {
 const char * component_name(WeightComponent component) {
     switch (component) {
         case WeightComponent::mot: return "MoT";
-        case WeightComponent::t5: return "UMT5";
-        case WeightComponent::vae: return "VAE";
+        case WeightComponent::umt5: return "UMT5";
+        case WeightComponent::vision_vae: return "VAE";
     }
     return "unknown";
 }
 
-void refresh_component_telemetry(Gwp05ModelArch & model) {
+void refresh_component_telemetry(ModelResources & model) {
     model.runtime_components.clear();
     model.resident_device_bytes = 0;
-    for (WeightComponent component : {WeightComponent::mot, WeightComponent::t5,
-                                      WeightComponent::vae}) {
+    for (WeightComponent component : {WeightComponent::mot, WeightComponent::umt5,
+                                      WeightComponent::vision_vae}) {
         const size_t index = static_cast<size_t>(component);
         model.runtime_components.push_back({component_name(component),
                                             model.component_loaded[index],
@@ -41,16 +53,16 @@ void refresh_component_telemetry(Gwp05ModelArch & model) {
         }
     }
     model.text_encoder_resident =
-        model.component_loaded[static_cast<size_t>(WeightComponent::t5)];
+        model.component_loaded[static_cast<size_t>(WeightComponent::umt5)];
     model.peak_component_device_bytes = std::max(
         model.peak_component_device_bytes, model.resident_device_bytes);
 }
 
-bool component_is_loaded(const Gwp05ModelArch & model, WeightComponent component) {
+bool component_is_loaded(const ExecutionState & model, WeightComponent component) {
     return model.component_loaded[static_cast<size_t>(component)];
 }
 
-void unload_component(Gwp05ModelArch & model, WeightComponent component) {
+void unload_component(ModelResources & model, WeightComponent component) {
     const auto begin = std::chrono::steady_clock::now();
     const size_t index = static_cast<size_t>(component);
     if (!model.component_loaded[index] && !model.weight_stores[index]) {
@@ -74,7 +86,7 @@ void unload_component(Gwp05ModelArch & model, WeightComponent component) {
     refresh_component_telemetry(model);
 }
 
-bool load_component(GgufReader & reader, Gwp05ModelArch & model,
+bool load_component(GgufReader & reader, ModelResources & model,
                     WeightComponent component) {
     const auto begin = std::chrono::steady_clock::now();
     const size_t index = static_cast<size_t>(component);
@@ -139,10 +151,10 @@ bool load_component(GgufReader & reader, Gwp05ModelArch & model,
     return true;
 }
 
-bool load_resident_weights(GgufReader & reader, Gwp05ModelArch & model) {
+bool load_resident_weights(GgufReader & reader, ModelResources & model) {
     if (!load_component(reader, model, WeightComponent::mot) ||
-        !load_component(reader, model, WeightComponent::t5) ||
-        !load_component(reader, model, WeightComponent::vae)) {
+        !load_component(reader, model, WeightComponent::umt5) ||
+        !load_component(reader, model, WeightComponent::vision_vae)) {
         model.load_state = LoadState::failed;
         return false;
     }
@@ -153,4 +165,16 @@ bool load_resident_weights(GgufReader & reader, Gwp05ModelArch & model) {
     return true;
 }
 
-} // namespace wam::internal::gwp05::engine
+ModelResources::~ModelResources() {
+    mot_graph.reset();
+    unrolled_action_graph.reset();
+    cached_action_graph.reset();
+    prompt_projection_graph.reset();
+    prefix_graph.reset();
+    prefix_storage.reset();
+    vae_graph.reset();
+    for (auto & store : weight_stores) store.reset();
+    backend = nullptr;
+}
+
+} // namespace wam::internal::gwp05

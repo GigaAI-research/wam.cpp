@@ -1,14 +1,15 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/networks/vision_vae.h"
+#include "models/gwp05/runtime.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
 
-std::vector<float> patchify_composite(const EngineInputsView & in,
-                                      const Config & cfg) {
+std::vector<float> patchify_composite(const PipelineInputsView & in,
+                                      const ModelGeometry & cfg) {
     const int width = static_cast<int>(cfg.image_width);
     const int height = static_cast<int>(cfg.image_height);
     const int expected = width * height * 3;
@@ -44,7 +45,7 @@ ggml_tensor * vae_bias(ggml_context * ctx, ggml_tensor * bias, int64_t channels)
     return ggml_reshape_4d(ctx, bias, 1, 1, channels, 1);
 }
 
-ggml_tensor * vae_conv(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * vae_conv(ggml_context * ctx, ExecutionState & model,
                        const std::string & prefix, ggml_tensor * input,
                        int stride, int padding) {
     ggml_tensor * weight = model.weight("vae." + prefix + ".weight");
@@ -63,7 +64,7 @@ ggml_tensor * vae_conv(ggml_context * ctx, Gwp05ModelArch & model,
     return ggml_add(ctx, output, vae_bias(ctx, bias, output->ne[2]));
 }
 
-ggml_tensor * vae_rms(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * vae_rms(ggml_context * ctx, ExecutionState & model,
                       const std::string & name, ggml_tensor * input) {
     const int64_t channels = input->ne[2];
     ggml_tensor * channel_first = ggml_cont(
@@ -80,7 +81,7 @@ ggml_tensor * vae_rms(ggml_context * ctx, Gwp05ModelArch & model,
     return ggml_cont(ctx, ggml_permute(ctx, channel_first, 2, 0, 1, 3));
 }
 
-ggml_tensor * vae_residual(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * vae_residual(ggml_context * ctx, ExecutionState & model,
                            const std::string & prefix, ggml_tensor * input) {
     ggml_tensor * shortcut = input;
     if (model.weights.count(compact_tensor_name("vae." + prefix + ".conv_shortcut.weight"))) {
@@ -116,7 +117,7 @@ ggml_tensor * vae_avg_shortcut(ggml_context * ctx, ggml_tensor * input,
     return restore_bf16 ? ggml_cast(ctx, shortcut, GGML_TYPE_BF16) : shortcut;
 }
 
-ggml_tensor * vae_down_block(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * vae_down_block(ggml_context * ctx, ExecutionState & model,
                              int index, ggml_tensor * input, bool downsample,
                              bool temporal, int64_t out_channels) {
     const std::string prefix = "encoder.down_blocks." + std::to_string(index);
@@ -135,7 +136,7 @@ ggml_tensor * vae_down_block(ggml_context * ctx, Gwp05ModelArch & model,
     return ggml_add(ctx, hidden, shortcut);
 }
 
-ggml_tensor * vae_mid_attention(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * vae_mid_attention(ggml_context * ctx, ExecutionState & model,
                                 ggml_tensor * input) {
     const int64_t width = input->ne[0];
     const int64_t height = input->ne[1];
@@ -183,8 +184,8 @@ ggml_tensor * vae_mid_attention(ggml_context * ctx, Gwp05ModelArch & model,
     return ggml_add(ctx, input, attended);
 }
 
-std::vector<float> run_vae(Gwp05ModelArch & model, const EngineInputsView & in) {
-    const Config & cfg = model.cfg;
+std::vector<float> run_vision_vae(ExecutionState & model, const PipelineInputsView & in) {
+    const ModelGeometry & cfg = model.cfg;
     using clock = std::chrono::steady_clock;
     if (!model.vae_graph) model.vae_graph = std::make_unique<VaeGraph>();
     VaeGraph & graph = *model.vae_graph;
@@ -274,4 +275,4 @@ std::vector<float> run_vae(Gwp05ModelArch & model, const EngineInputsView & in) 
     return latent;
 }
 
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

@@ -1,5 +1,5 @@
 #include "artifact/artifact_view.h"
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 #include "models/gwp05/inputs.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"
@@ -205,8 +205,8 @@ int main(int argc, char ** argv) {
             policy::try_read_policy_spec(artifact_view);
         require(parsed.has_value(), "formal GGUF has no PolicySpec");
         spec = *parsed;
-        const std::shared_ptr<const gwp05::ArtifactContract> artifact =
-            gwp05::load_artifact(reader, spec);
+        const std::shared_ptr<const gwp05::Gwp05Contract> artifact =
+            gwp05::load_contract(reader, spec);
         std::mt19937 rng(20260725);
         const gwp05::PreparedInputs prepared = gwp05::prepare_inputs(
             inputs, *artifact, spec,

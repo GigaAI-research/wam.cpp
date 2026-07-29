@@ -1,5 +1,5 @@
 #include "artifact/gguf_reader.h"
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"
 
@@ -90,8 +90,8 @@ int main(int argc, char ** argv) {
                 wam::internal::policy::ActionRecoveryKind::add_current_state,
             "legacy GWP action recovery changed");
 
-    const std::shared_ptr<const wam::internal::gwp05::ArtifactContract>
-        artifact = wam::internal::gwp05::load_artifact(reader, spec);
+    const std::shared_ptr<const wam::internal::gwp05::Gwp05Contract>
+        artifact = wam::internal::gwp05::load_contract(reader, spec);
     require(artifact->geometry.hidden == 3072 &&
                 artifact->geometry.layers == 30 &&
                 artifact->geometry.heads == 24 &&

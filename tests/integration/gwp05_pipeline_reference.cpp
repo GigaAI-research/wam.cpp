@@ -1,9 +1,10 @@
 #include "support/test_utils.h"
 
 #include "artifact/gguf_reader.h"
-#include "models/gwp05/artifact.h"
-#include "models/gwp05/engine/engine.h"
+#include "models/gwp05/contract.h"
+#include "models/gwp05/pipeline.h"
 #include "models/gwp05/inputs.h"
+#include "models/gwp05/state.h"
 #include "wam/wam.h"
 
 #include <algorithm>
@@ -113,11 +114,10 @@ void compare_stage(const std::filesystem::path & actual_root,
 int main(int argc, char ** argv) {
     using wam::internal::GgufReader;
     namespace gwp05 = wam::internal::gwp05;
-    namespace engine = wam::internal::gwp05::engine;
 
     if (argc != 4) {
         throw std::runtime_error(
-            "usage: wam_gwp05_engine_reference MODEL_GGUF INPUT_DIR "
+            "usage: wam_gwp05_pipeline_reference MODEL_GGUF INPUT_DIR "
             "DONOR_STAGE_DIR");
     }
     const std::filesystem::path model_path = argv[1];
@@ -127,9 +127,6 @@ int main(int argc, char ** argv) {
         std::filesystem::temp_directory_path() /
         ("wam-gwp05-slice4b-" + std::to_string(getpid()));
     std::filesystem::create_directories(dump_root);
-    if (setenv("WAM_GWP05_DUMP_DIR", dump_root.c_str(), 1) != 0) {
-        throw std::runtime_error("failed to set GWP dump directory");
-    }
 
     Image high = read_ppm(input_root / "camera_high.ppm");
     Image left = read_ppm(input_root / "camera_left_wrist.ppm");
@@ -145,8 +142,8 @@ int main(int argc, char ** argv) {
     auto reader = GgufReader::open(model_path.string());
     const wam::internal::policy::PolicySpec policy_spec =
         gwp05::read_legacy_policy_spec(*reader);
-    const std::shared_ptr<const gwp05::ArtifactContract> artifact =
-        gwp05::load_artifact(reader, policy_spec);
+    const std::shared_ptr<const gwp05::Gwp05Contract> artifact =
+        gwp05::load_contract(reader, policy_spec);
 
     const auto image_view = [](const char * name, const Image & image) {
         return wam::ImageView{
@@ -173,18 +170,22 @@ int main(int argc, char ** argv) {
         inputs, *artifact, policy_spec,
         wam::LanguageRuntimeMode::external_embedding, session_rng);
 
-    engine::EngineOptions options;
+    gwp05::ModelOptions options;
     options.backend = wam::Backend::automatic;
     options.compute_precision = wam::ComputePrecision::f32;
     options.language_mode = wam::LanguageRuntimeMode::external_embedding;
     options.prompt_cache_capacity = 0;
-    engine::EnginePtr engine_model =
-        engine::create_engine(*artifact, options);
-    engine::EngineSessionOptions session_options;
-    engine::EngineSessionPtr engine_session =
-        engine::create_engine_session(*engine_model, session_options);
+    wam::DebugDumpConfig dump_config;
+    dump_config.enabled = true;
+    dump_config.directory = dump_root.string();
+    options.debug_dump =
+        std::make_shared<wam::internal::ggml_backend::DebugDump>(dump_config);
+    gwp05::LoadedModel loaded =
+        gwp05::load_model_resources(*artifact, options);
+    std::unique_ptr<gwp05::SessionState> session_state =
+        gwp05::create_session_state(*loaded.resources);
     const gwp05::CoreAction action =
-        engine::predict(*engine_session, prepared);
+        gwp05::run_pipeline(*loaded.resources, *session_state, prepared, true);
     wam::test::require(action.values.size() == 48 * 32,
                        "core action shape changed");
 
@@ -227,9 +228,9 @@ int main(int argc, char ** argv) {
     wam::test::require(final_mean <= 1.0e-3 && final_max <= 1.0e-3,
                        "returned normalized action differs from donor");
 
-    engine::reset(*engine_session);
+    gwp05::reset_session(*loaded.resources, *session_state);
     const gwp05::CoreAction repeated =
-        engine::predict(*engine_session, prepared);
+        gwp05::run_pipeline(*loaded.resources, *session_state, prepared, true);
     double repeat_mean = 0.0;
     double repeat_max = 0.0;
     for (std::size_t index = 0; index < action.values.size(); ++index) {
@@ -244,8 +245,8 @@ int main(int argc, char ** argv) {
     wam::test::require(prepared.observation.action_noise == noise,
                        "engine modified explicit action noise");
 
-    engine_session.reset();
-    engine_model.reset();
+    session_state.reset();
+    loaded.resources.reset();
 
     wam::RuntimeConfig model_options;
     model_options.backend = wam::Backend::automatic;
@@ -318,9 +319,8 @@ int main(int argc, char ** argv) {
     wam::test::require(reset_random_values == first_random_values,
                        "public GWP reset did not restore the session seed");
 
-    unsetenv("WAM_GWP05_DUMP_DIR");
     std::filesystem::remove_all(dump_root);
-    std::cout << "GWP05 Slice 4B/5 engine and public lifecycle parity: PASS "
+    std::cout << "GWP05 pipeline and public lifecycle parity: PASS "
                  "reset_mean_abs="
               << repeat_mean << " reset_max_abs=" << repeat_max << '\n';
     return 0;

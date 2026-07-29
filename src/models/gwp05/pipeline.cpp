@@ -1,13 +1,21 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/cache.h"
+#include "models/gwp05/pipeline.h"
+#include "models/gwp05/networks/mot.h"
+#include "models/gwp05/networks/umt5.h"
+#include "models/gwp05/networks/vision_vae.h"
+#include "models/gwp05/resources.h"
+#include "models/gwp05/runtime.h"
+#include "models/gwp05/state.h"
 
 #include "wam/error.h"
 #include "runtime/telemetry.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
 namespace {
 
 [[noreturn]] void unsupported(const std::string & message,
@@ -18,7 +26,7 @@ namespace {
     throw Error(ErrorCode::unsupported, message, std::move(details));
 }
 
-LanguageExecutionMode resolve_language_mode(const EngineOptions & options) {
+LanguageExecutionMode resolve_language_mode(const ModelOptions & options) {
     if (options.fixed_prompt.has_value()) {
         if (options.language_mode != LanguageRuntimeMode::tokens) {
             throw Error(ErrorCode::failed_precondition,
@@ -33,7 +41,7 @@ LanguageExecutionMode resolve_language_mode(const EngineOptions & options) {
             return LanguageExecutionMode::external_embedding;
         case LanguageRuntimeMode::automatic:
             throw Error(ErrorCode::failed_precondition,
-                        "GWP engine requires a resolved language mode");
+                        "GWP model requires a resolved language mode");
     }
     throw Error(ErrorCode::failed_precondition,
                 "invalid GWP language runtime mode");
@@ -60,8 +68,8 @@ std::vector<float> embedding_as_f32(const Tensor & embedding) {
     return values;
 }
 
-Telemetry public_stats(const Gwp05ModelArch & engine) {
-    const EngineTelemetry & source = engine.stats;
+Telemetry public_stats(const ExecutionState & engine) {
+    const PipelineTelemetry & source = engine.stats;
     Telemetry output;
     output.model_milliseconds = source.ms_total;
     output.model_vision_milliseconds = source.ms_vision;
@@ -92,9 +100,9 @@ Telemetry public_stats(const Gwp05ModelArch & engine) {
     return output;
 }
 
-std::unique_ptr<EngineSessionState> make_session_state(
-    const EngineResources & resources) {
-    auto state = std::make_unique<EngineSessionState>();
+std::unique_ptr<SessionState> make_session_state(
+    const ModelResources & resources) {
+    auto state = std::make_unique<SessionState>();
     state->cfg = resources.cfg;
     state->runtime_components = resources.runtime_components;
     state->language_mode = resources.language_mode;
@@ -139,7 +147,7 @@ KernelDispatch resolve_kernel_dispatch(
     ComputePrecision precision, Backend backend,
     const std::string & artifact_policy) {
     if (backend == Backend::unknown || backend == Backend::cpu_metadata) {
-        unsupported("GWP engine requires a compute backend", "backend",
+        unsupported("GWP model requires a compute backend", "backend",
                     "expected automatic or cuda");
     }
     if (precision == ComputePrecision::unknown) {
@@ -197,29 +205,14 @@ KernelDispatch resolve_kernel_dispatch(
     return result;
 }
 
-void Gwp05ModelArch::reset_core() {
-    mot_graph.reset();
-    unrolled_action_graph.reset();
-    cached_action_graph.reset();
-    prefix_graph.reset();
-    prefix_storage.reset();
-    prompt_projection_graph.reset();
-    prompt_cache.clear();
-    projected_prompt_signature.clear();
-    prompt_cache_hits = 0;
-    prompt_cache_misses = 0;
-    projected_prompt_hits = 0;
-    projected_prompt_misses = 0;
-    stats = {};
-}
-
-EnginePtr create_engine(const ArtifactContract & artifact,
-                        const EngineOptions & options) {
-    if (!artifact.reader) {
+LoadedModel load_model_resources(const Gwp05Contract & contract,
+                                 const ModelOptions & options) {
+    if (!contract.reader) {
         throw Error(ErrorCode::internal,
                     "GWP artifact has no backing reader");
     }
-    auto model = std::make_unique<EngineResources>();
+    validate_runtime_contract(contract);
+    auto model = std::make_shared<ModelResources>();
     model->logger = options.logger
         ? options.logger
         : std::make_shared<runtime::Logger>(RuntimeConfig{});
@@ -233,10 +226,10 @@ EnginePtr create_engine(const ArtifactContract & artifact,
     model->language_mode = resolve_language_mode(options);
     model->dispatch = resolve_kernel_dispatch(
         options.compute_precision, options.backend,
-        artifact.conversion_policy);
-    GgufReader & reader = *artifact.reader;
-    const Geometry & geometry = artifact.geometry;
-    Config & cfg = model->cfg;
+        contract.conversion_policy);
+    GgufReader & reader = *contract.reader;
+    const Geometry & geometry = contract.geometry;
+    ModelGeometry & cfg = model->cfg;
     cfg.hidden = geometry.hidden;
     cfg.n_layers = geometry.layers;
     cfg.n_q_heads = geometry.heads;
@@ -268,38 +261,22 @@ EnginePtr create_engine(const ArtifactContract & artifact,
     cfg.t5_head_dim = geometry.t5_head_dim;
     cfg.t5_layers = geometry.t5_layers;
     cfg.vae_z_dim = geometry.vae_z_dim;
-    cfg.n_img = artifact.sequence_geometry.visual_tokens;
+    cfg.n_img = contract.sequence_geometry.visual_tokens;
     cfg.n_lang = semantics::kPromptTokens;
-    cfg.n_state = artifact.sequence_geometry.state_tokens;
-    cfg.n_prefix = artifact.sequence_geometry.prefix_tokens;
-    cfg.n_suffix = artifact.sequence_geometry.action_tokens;
-    cfg.n_full = artifact.sequence_geometry.full_tokens;
+    cfg.n_state = contract.sequence_geometry.state_tokens;
+    cfg.n_prefix = contract.sequence_geometry.prefix_tokens;
+    cfg.n_suffix = contract.sequence_geometry.action_tokens;
+    cfg.n_full = contract.sequence_geometry.full_tokens;
     cfg.rope_n_dims = static_cast<int>(cfg.head_dim);
     cfg.rope_freq_base = 10000.0F;
     model->t5_max_length = geometry.t5_max_length;
     model->conversion_policy =
-        artifact.conversion_policy == "legacy-source"
-            ? "" : artifact.conversion_policy;
+        contract.conversion_policy == "legacy-source"
+            ? "" : contract.conversion_policy;
     model->precision_policy = model->dispatch.native_bf16
-        ? MotPrecisionPolicy::NATIVE_BF16 : MotPrecisionPolicy::F32;
-    model->vae_latents_mean =
-        reader.optional_f32_array("gwp05.vae_latents_mean");
-    model->vae_latents_std =
-        reader.optional_f32_array("gwp05.vae_latents_std");
-
-    if (model->vae_latents_mean.size() !=
-            static_cast<std::size_t>(cfg.vae_z_dim) ||
-        model->vae_latents_std.size() !=
-            static_cast<std::size_t>(cfg.vae_z_dim)) {
-        throw Error(ErrorCode::incompatible_artifact,
-                    "GWP runtime metadata dimensions are inconsistent");
-    }
-    for (float value : model->vae_latents_std) {
-        if (!(value > 0.0F) || !std::isfinite(value)) {
-            throw Error(ErrorCode::incompatible_artifact,
-                        "GWP VAE latent standard deviation is invalid");
-        }
-    }
+        ? MotPrecisionPolicy::native_bf16 : MotPrecisionPolicy::f32;
+    model->vae_latents_mean = contract.vae_latents_mean;
+    model->vae_latents_std = contract.vae_latents_std;
 
     if (!init_backend(*model)) {
         throw Error(ErrorCode::resource_exhausted,
@@ -313,13 +290,13 @@ EnginePtr create_engine(const ArtifactContract & artifact,
             }
             break;
         case LanguageExecutionMode::fixed_tokens: {
-            if (!load_component(reader, *model, WeightComponent::t5)) {
+            if (!load_component(reader, *model, WeightComponent::umt5)) {
                 throw Error(ErrorCode::resource_exhausted,
                             "failed to load the GWP text encoder");
             }
             model->load_state = LoadState::text_only;
             const FixedPrompt & prompt = *options.fixed_prompt;
-            EngineInputsView prompt_inputs;
+            PipelineInputsView prompt_inputs;
             prompt_inputs.lang_tokens = prompt.token_ids.data();
             prompt_inputs.n_lang =
                 static_cast<int>(prompt.token_ids.size());
@@ -330,15 +307,15 @@ EnginePtr create_engine(const ArtifactContract & artifact,
             PromptCacheEntry fixed;
             fixed.tokens = prompt.token_ids;
             fixed.mask = prompt.attention_mask;
-            fixed.embedding = run_t5(*model, prompt_inputs);
+            fixed.embedding = run_umt5(*model, prompt_inputs);
             if (fixed.embedding.empty()) {
                 throw Error(ErrorCode::inference_failed,
                             "failed to encode the fixed GWP prompt");
             }
             model->fixed_prompt = std::move(fixed);
-            unload_component(*model, WeightComponent::t5);
+            unload_component(*model, WeightComponent::umt5);
             if (!load_component(reader, *model, WeightComponent::mot) ||
-                !load_component(reader, *model, WeightComponent::vae)) {
+                !load_component(reader, *model, WeightComponent::vision_vae)) {
                 throw Error(ErrorCode::resource_exhausted,
                             "failed to load GWP compute weights");
             }
@@ -347,7 +324,7 @@ EnginePtr create_engine(const ArtifactContract & artifact,
         }
         case LanguageExecutionMode::external_embedding:
             if (!load_component(reader, *model, WeightComponent::mot) ||
-                !load_component(reader, *model, WeightComponent::vae)) {
+                !load_component(reader, *model, WeightComponent::vision_vae)) {
                 throw Error(ErrorCode::resource_exhausted,
                             "failed to load GWP compute weights");
             }
@@ -359,12 +336,12 @@ EnginePtr create_engine(const ArtifactContract & artifact,
         "gwp05: profile=%s policy=%s layers=%lld hidden=%lld "
         "action_hidden=%lld ref_tokens=%lld chunk=%d steps=%d",
         execution_profile_name(model->dispatch.profile),
-        artifact.conversion_policy.c_str(),
+        contract.conversion_policy.c_str(),
         static_cast<long long>(cfg.n_layers),
         static_cast<long long>(cfg.hidden),
         static_cast<long long>(cfg.expert_h),
         static_cast<long long>(cfg.n_img), cfg.action_chunk, cfg.num_steps);
-    EngineInfo info;
+    runtime::EngineInfo info;
     info.backend = options.backend;
     info.compute_precision = model->dispatch.profile ==
             ExecutionProfile::latency
@@ -374,10 +351,10 @@ EnginePtr create_engine(const ArtifactContract & artifact,
     info.peak_component_device_bytes =
         model->peak_component_device_bytes;
     info.runtime_components = model->runtime_components;
-    return EnginePtr(new Engine(std::move(model), std::move(info)));
+    return {std::move(model), std::move(info)};
 }
 
-std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
+std::vector<float> ExecutionState::execute(const PipelineInputsView & in) {
     if (metadata_only) {
         logf(*this, LogLevel::error,
              "gwp05: predict is unavailable in metadata-only mode");
@@ -415,7 +392,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
         reference.assign(in.precomputed_ref_latent,
                          in.precomputed_ref_latent + latent_count);
     } else {
-        reference = run_vae(*this, in);
+        reference = run_vision_vae(*this, in);
     }
     if (reference.size() != latent_count) return {};
     debug_dump(*this, "vae_latent", reference,
@@ -463,7 +440,7 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
         if ((prompt_cache_hit = get_cached_prompt(in, prompt))) {
         // The cached embedding already includes the zero-padded language suffix.
         } else {
-            prompt = run_t5(*this, in);
+            prompt = run_umt5(*this, in);
             ran_t5 = true;
         }
     }
@@ -596,25 +573,16 @@ std::vector<float> Gwp05ModelArch::predict_core(const EngineInputsView & in) {
     return action;
 }
 
-EngineSessionPtr create_engine_session(
-    Engine & instance, const EngineSessionOptions & options) {
-    if (!instance.resources_) {
-        throw Error(ErrorCode::failed_precondition,
-                    "GWP engine has no model resources");
-    }
-    return EngineSessionPtr(new EngineSession(
-        instance,
-        make_session_state(*instance.resources_),
-        options.enable_prefix_cache));
+std::unique_ptr<SessionState> create_session_state(
+    const ModelResources & resources) {
+    return make_session_state(resources);
 }
 
-CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
-    if (session.owner_ == nullptr || session.state_ == nullptr) {
-        throw Error(ErrorCode::failed_precondition,
-                    "GWP engine session is not initialized");
-    }
-    Gwp05ModelArch & instance = *session.state_;
-    std::lock_guard<std::mutex> lock(session.owner_->execution_mutex_);
+CoreAction run_pipeline(ModelResources & resources, SessionState & session,
+                        const PreparedInputs & inputs,
+                        bool enable_prefix_cache) {
+    ExecutionState & instance = session;
+    std::lock_guard<std::mutex> lock(resources.execution_mutex);
     const std::size_t image_values =
         static_cast<std::size_t>(instance.cfg.image_width) *
         static_cast<std::size_t>(instance.cfg.image_height) * 3;
@@ -632,17 +600,17 @@ CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
             static_cast<std::size_t>(instance.cfg.max_state_dim) ||
         inputs.observation.action_noise.size() != noise_values) {
         throw Error(ErrorCode::invalid_argument,
-                    "prepared GWP engine input contract is invalid");
+                    "prepared GWP model input contract is invalid");
     }
     std::vector<float> prompt_embedding;
-    EngineInputsView view;
+    PipelineInputsView view;
     view.composite_image = inputs.observation.composite_image.pixels.data();
     view.composite_image_n = static_cast<int>(
         inputs.observation.composite_image.pixels.size());
     view.model_state = inputs.observation.model_state.data();
     view.action_noise = inputs.observation.action_noise.data();
     view.enable_prefix_cache =
-        inputs.enable_prefix_cache && session.enable_prefix_cache_;
+        inputs.enable_prefix_cache && enable_prefix_cache;
     if (inputs.language_mode == LanguageRuntimeMode::external_embedding) {
         prompt_embedding = embedding_as_f32(inputs.embedding);
         view.precomputed_prompt_emb = prompt_embedding.data();
@@ -661,34 +629,18 @@ CoreAction predict(EngineSession & session, const PreparedInputs & inputs) {
     }
 
     CoreAction output;
-    output.values = instance.predict_core(view);
+    output.values = instance.execute(view);
     if (output.values.empty()) {
         throw Error(ErrorCode::inference_failed,
-                    "GWP engine inference failed");
+                    "GWP model inference failed");
     }
     output.stats = public_stats(instance);
     return output;
 }
 
-void reset(EngineSession & session) {
-    if (session.owner_ == nullptr || session.state_ == nullptr) {
-        throw Error(ErrorCode::failed_precondition,
-                    "GWP engine session is not initialized");
-    }
-    std::lock_guard<std::mutex> lock(session.owner_->execution_mutex_);
-    session.state_->reset_core();
+void reset_session(ModelResources & resources, SessionState & session) {
+    std::lock_guard<std::mutex> lock(resources.execution_mutex);
+    session.reset();
 }
 
-const EngineInfo & engine_info(const Engine & instance) noexcept {
-    return instance.info_;
-}
-
-void EngineDeleter::operator()(Engine * instance) const noexcept {
-    delete instance;
-}
-
-void EngineSessionDeleter::operator()(EngineSession * session) const noexcept {
-    delete session;
-}
-
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

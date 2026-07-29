@@ -42,6 +42,22 @@ wam_assert_no_match(
 file(GLOB_RECURSE gwp05_sources
     "${WAM_SOURCE_DIR}/src/models/gwp05/*.h"
     "${WAM_SOURCE_DIR}/src/models/gwp05/*.cpp")
+if(EXISTS "${WAM_SOURCE_DIR}/src/models/gwp05/engine" OR
+   EXISTS "${WAM_SOURCE_DIR}/src/models/gwp05/engine_internal.h")
+    message(FATAL_ERROR
+        "GWP05 legacy engine directory or bus header was reintroduced")
+endif()
+file(GLOB_RECURSE gwp05_network_sources
+    "${WAM_SOURCE_DIR}/src/models/gwp05/networks/*.h"
+    "${WAM_SOURCE_DIR}/src/models/gwp05/networks/*.cpp")
+wam_assert_no_match(
+    "GWP05 private engine namespace was reintroduced"
+    "namespace[ \\t]+engine([ \\t]*\\{|[ \\t]*$)"
+    ${gwp05_sources})
+wam_assert_no_match(
+    "GWP05 network code depends on artifact, policy, model, or serving"
+    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/)"
+    ${gwp05_network_sources})
 file(GLOB_RECURSE fastwam_sources
     "${WAM_SOURCE_DIR}/src/models/fastwam/*.h"
     "${WAM_SOURCE_DIR}/src/models/fastwam/*.cpp")

@@ -1,5 +1,5 @@
 #include "artifact/artifact_view.h"
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 #include "policy/policy_spec.h"
 #include "support/test_utils.h"
 
@@ -123,8 +123,8 @@ int main(int argc, char ** argv) {
                          7, 8, 9, 10, 11, 12, -1}),
             "formal RoboTwin action recovery changed");
 
-    const std::shared_ptr<const gwp05::ArtifactContract> artifact =
-        gwp05::load_artifact(reader, spec);
+    const std::shared_ptr<const gwp05::Gwp05Contract> artifact =
+        gwp05::load_contract(reader, spec);
     require(!artifact->legacy_policy_spec &&
                 artifact->geometry.action_dim == 14 &&
                 artifact->geometry.real_state_dim == 14 &&

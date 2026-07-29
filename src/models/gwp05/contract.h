@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace wam::internal {
 
@@ -44,20 +45,23 @@ struct Geometry {
     std::uint32_t vae_z_dim = 0;
 };
 
-struct ArtifactContract {
+struct Gwp05Contract {
     std::shared_ptr<GgufReader> reader;
     Geometry geometry;
     semantics::SequenceGeometry sequence_geometry;
+    std::vector<float> vae_latents_mean;
+    std::vector<float> vae_latents_std;
     std::string conversion_policy;
     bool legacy_policy_spec = false;
 };
 
 policy::PolicySpec read_legacy_policy_spec(const GgufReader & reader);
-std::shared_ptr<const ArtifactContract> load_artifact(
+std::shared_ptr<const Gwp05Contract> load_contract(
     std::shared_ptr<GgufReader> reader,
     const policy::PolicySpec & policy_spec);
-void validate_artifact(const ArtifactContract & artifact,
+void validate_contract(const Gwp05Contract & contract,
                        const policy::PolicySpec & policy_spec);
+void validate_runtime_contract(const Gwp05Contract & contract);
 
 } // namespace gwp05
 } // namespace wam::internal

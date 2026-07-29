@@ -1,4 +1,4 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/runtime.h"
 
 #include "backends/ggml/tensor_io.h"
 
@@ -15,7 +15,7 @@
 #include <cstring>
 #include <thread>
 
-namespace wam::internal::gwp05::engine {
+namespace wam::internal::gwp05 {
 
 int default_cpu_threads() {
     const unsigned count = std::thread::hardware_concurrency();
@@ -23,10 +23,10 @@ int default_cpu_threads() {
 }
 
 const char * precision_policy_name(MotPrecisionPolicy policy) {
-    return policy == MotPrecisionPolicy::NATIVE_BF16 ? "native-bf16" : "f32";
+    return policy == MotPrecisionPolicy::native_bf16 ? "native-bf16" : "f32";
 }
 
-void logf(const Gwp05ModelArch & model, LogLevel level,
+void logf(const ExecutionState & model, LogLevel level,
           const char * format, ...) {
     if (!model.logger) return;
     std::va_list arguments;
@@ -35,32 +35,32 @@ void logf(const Gwp05ModelArch & model, LogLevel level,
     va_end(arguments);
 }
 
-void debug_dump(const Gwp05ModelArch & model, const char * name,
+void debug_dump(const ExecutionState & model, const char * name,
                 const std::vector<float> & values,
                 const std::vector<int64_t> & shape) {
     if (model.debug_dumper) model.debug_dumper->write(name, values, shape);
 }
 
-bool debug_dump_enabled(const Gwp05ModelArch & model) {
+bool debug_dump_enabled(const ExecutionState & model) {
     return model.debug_dumper && model.debug_dumper->enabled();
 }
 
-bool cache_debug_dump_enabled(const Gwp05ModelArch & model) {
+bool cache_debug_dump_enabled(const ExecutionState & model) {
     return debug_dump_enabled(model);
 }
 
-bool any_debug_dump_enabled(const Gwp05ModelArch & model) {
+bool any_debug_dump_enabled(const ExecutionState & model) {
     return debug_dump_enabled(model);
 }
 
-void audit_mixed_binary_nodes(const Gwp05ModelArch & model,
+void audit_mixed_binary_nodes(const ExecutionState & model,
                               const char * graph_name, ggml_cgraph * graph) {
     if (model.debug_dumper) {
         model.debug_dumper->audit_mixed_binary_nodes(graph_name, graph);
     }
 }
 
-void debug_dump_tensor(const Gwp05ModelArch & model, const char * name,
+void debug_dump_tensor(const ExecutionState & model, const char * name,
                        ggml_tensor * tensor) {
     if (model.debug_dumper) model.debug_dumper->write_tensor(name, tensor);
 }
@@ -128,35 +128,35 @@ std::string compact_tensor_name(const std::string & full_name) {
     return component + "." + name;
 }
 
-bool action_prompt_cache_enabled(const Gwp05ModelArch & model) {
+bool action_prompt_cache_enabled(const ExecutionState & model) {
     return model.tuning.action_prompt_cache;
 }
 
-bool prompt_kv_cache_enabled(const Gwp05ModelArch & model) {
+bool prompt_kv_cache_enabled(const ExecutionState & model) {
     return action_prompt_cache_enabled(model) && model.tuning.prompt_kv_cache;
 }
 
-bool single_token_timestep_enabled(const Gwp05ModelArch & model) {
+bool single_token_timestep_enabled(const ExecutionState & model) {
     return model.dispatch.single_token_timestep;
 }
 
-bool cross_request_prompt_cache_enabled(const Gwp05ModelArch & model) {
+bool cross_request_prompt_cache_enabled(const ExecutionState & model) {
     return prompt_kv_cache_enabled(model) && model.prompt_cache_limit != 0;
 }
 
-bool native_bf16(const Gwp05ModelArch & model) {
+bool native_bf16(const ExecutionState & model) {
     return model.dispatch.native_bf16;
 }
 
-bool native_vae_bf16(const Gwp05ModelArch & model) {
+bool native_vae_bf16(const ExecutionState & model) {
     return model.dispatch.bf16_vae;
 }
 
-bool packed_self_qkv(const Gwp05ModelArch & model) {
+bool packed_self_qkv(const ExecutionState & model) {
     return model.dispatch.packed_qkv;
 }
 
-bool native_action_region(const Gwp05ModelArch & model) {
+bool native_action_region(const ExecutionState & model) {
     return native_bf16(model) && model.building_native_action;
 }
 
@@ -182,11 +182,11 @@ bool tensor_shape_is(const ggml_tensor * tensor, const char * name,
     return true;
 }
 
-bool bf16_attention_value_output(const Gwp05ModelArch & model);
-bool bf16_kv_cache_storage(const Gwp05ModelArch & model);
+bool bf16_attention_value_output(const ExecutionState & model);
+bool bf16_kv_cache_storage(const ExecutionState & model);
 
-bool prefix_storage_is_valid(const Gwp05ModelArch & model) {
-    const Config & cfg = model.cfg;
+bool prefix_storage_is_valid(const ExecutionState & model) {
+    const ModelGeometry & cfg = model.cfg;
     const PrefixStorage * storage = model.prefix_storage.get();
     if (!storage) {
         logf(model, LogLevel::error, "gwp05: cached action requested without prefix storage");
@@ -239,7 +239,7 @@ bool prefix_storage_is_valid(const Gwp05ModelArch & model) {
     return true;
 }
 
-bool init_backend(Gwp05ModelArch & model) {
+bool init_backend(ModelResources & model) {
 #ifdef GGML_USE_CUDA
     if (model.backend_request == Backend::automatic ||
         model.backend_request == Backend::cuda) {
@@ -307,27 +307,27 @@ ggml_tensor * linear(ggml_context * ctx, ggml_tensor * weight, ggml_tensor * bia
     return bias ? ggml_add(ctx, result, bias) : result;
 }
 
-bool bf16_projection_activations(const Gwp05ModelArch & model) {
+bool bf16_projection_activations(const ExecutionState & model) {
     return native_action_region(model) && model.dispatch.bf16_output_gemm;
 }
 
-bool bf16_ffn_activations(const Gwp05ModelArch & model) {
+bool bf16_ffn_activations(const ExecutionState & model) {
     return native_action_region(model) && model.dispatch.bf16_output_gemm;
 }
 
-bool bf16_qkv_activations(const Gwp05ModelArch & model) {
+bool bf16_qkv_activations(const ExecutionState & model) {
     return native_action_region(model) && model.dispatch.bf16_output_gemm;
 }
 
-bool bf16_attention_value_output(const Gwp05ModelArch & model) {
+bool bf16_attention_value_output(const ExecutionState & model) {
     return native_action_region(model);
 }
 
-bool bf16_kv_cache_storage(const Gwp05ModelArch & model) {
+bool bf16_kv_cache_storage(const ExecutionState & model) {
     return model.dispatch.bf16_hidden_and_kv;
 }
 
-bool unsafe_fast_native_bf16(const Gwp05ModelArch & model) {
+bool unsafe_fast_native_bf16(const ExecutionState & model) {
     return native_action_region(model) && !model.dispatch.f32_accumulation;
 }
 
@@ -378,7 +378,7 @@ void get_f32_tensor(ggml_tensor * tensor, std::vector<float> & values) {
     values = ggml_backend::get_f32(tensor);
 }
 
-ggml_tensor * scheduler_step(ggml_context * ctx, Gwp05ModelArch & model,
+ggml_tensor * scheduler_step(ggml_context * ctx, ExecutionState & model,
                              ggml_tensor * action, ggml_tensor * velocity,
                              ggml_tensor * dt) {
     if (!native_action_region(model)) {
@@ -425,28 +425,4 @@ ggml_tensor * layer_norm(ggml_context * ctx, ggml_tensor * input,
     return result;
 }
 
-Gwp05ModelArch::~Gwp05ModelArch() {
-    mot_graph.reset();
-    unrolled_action_graph.reset();
-    cached_action_graph.reset();
-    prompt_projection_graph.reset();
-    prefix_graph.reset();
-    prefix_storage.reset();
-    vae_graph.reset();
-    backend = nullptr;
-    weights.clear();
-}
-
-EngineResources::~EngineResources() {
-    mot_graph.reset();
-    unrolled_action_graph.reset();
-    cached_action_graph.reset();
-    prompt_projection_graph.reset();
-    prefix_graph.reset();
-    prefix_storage.reset();
-    vae_graph.reset();
-    for (auto & store : weight_stores) store.reset();
-    backend = nullptr;
-}
-
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

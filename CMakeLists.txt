@@ -137,19 +137,20 @@ set(wam_model_objects "")
 if(WAM_BUILD_GWP05)
     add_library(wam_model_gwp05 OBJECT
         src/models/common/scheduler.cpp
-        src/models/gwp05/artifact.cpp
-        src/models/gwp05/engine/action.cpp
-        src/models/gwp05/engine/backbone.cpp
-        src/models/gwp05/engine/cache.cpp
-        src/models/gwp05/engine/engine.cpp
-        src/models/gwp05/engine/language_encoder.cpp
-        src/models/gwp05/engine/observation_encoder.cpp
-        src/models/gwp05/engine/runtime.cpp
-        src/models/gwp05/engine/weights.cpp
+        src/models/gwp05/contract.cpp
         src/models/gwp05/inputs.cpp
         src/models/gwp05/module.cpp
         src/models/gwp05/model.cpp
-        src/models/gwp05/semantics.cpp)
+        src/models/gwp05/pipeline.cpp
+        src/models/gwp05/state.cpp
+        src/models/gwp05/cache.cpp
+        src/models/gwp05/cache_action.cpp
+        src/models/gwp05/resources.cpp
+        src/models/gwp05/runtime.cpp
+        src/models/gwp05/semantics.cpp
+        src/models/gwp05/networks/umt5.cpp
+        src/models/gwp05/networks/vision_vae.cpp
+        src/models/gwp05/networks/mot.cpp)
     add_library(wam::model_gwp05 ALIAS wam_model_gwp05)
     wam_configure_internal_target(wam_model_gwp05)
     target_link_libraries(wam_model_gwp05 PRIVATE

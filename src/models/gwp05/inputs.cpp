@@ -36,7 +36,7 @@ bool supports_embedding(policy::LanguageInputMode mode) {
 }
 
 semantics::PromptPlan validate_tokens(
-    const TokenInput & input, const ArtifactContract & artifact,
+    const TokenInput & input, const Gwp05Contract & artifact,
     const policy::LanguageSpec & language,
     std::vector<std::int32_t> & token_ids,
     std::vector<std::int32_t> & attention_mask) {
@@ -73,7 +73,7 @@ semantics::PromptPlan validate_tokens(
 }
 
 void prepare_token_language(const TokenInput & input,
-                            const ArtifactContract & artifact,
+                            const Gwp05Contract & artifact,
                             const policy::LanguageSpec & language,
                             PreparedInputs & prepared) {
     std::vector<std::int32_t> token_ids;
@@ -85,7 +85,7 @@ void prepare_token_language(const TokenInput & input,
 }
 
 void prepare_embedding_language(
-    const EmbeddingInput & input, const ArtifactContract & artifact,
+    const EmbeddingInput & input, const Gwp05Contract & artifact,
     const policy::LanguageSpec & language, PreparedInputs & prepared) {
     policy::PreparedEmbedding common = policy::prepare_embedding_input(
         input, language, artifact.geometry.t5_hidden);
@@ -106,7 +106,7 @@ TokenInput fixed_prompt_view(const FixedPrompt & prompt) {
 }
 
 void prepare_language(const Observation & inputs,
-                      const ArtifactContract & artifact,
+                      const Gwp05Contract & artifact,
                       const policy::PolicySpec & policy_spec,
                       LanguageRuntimeMode language_mode,
                       const std::optional<FixedPrompt> & fixed_prompt,
@@ -184,7 +184,7 @@ void prepare_language(const Observation & inputs,
 } // namespace
 
 PreparedInputs prepare_inputs(
-    const Observation & inputs, const ArtifactContract & artifact,
+    const Observation & inputs, const Gwp05Contract & artifact,
     const policy::PolicySpec & policy_spec,
     LanguageRuntimeMode language_mode,
     std::mt19937 & session_rng,

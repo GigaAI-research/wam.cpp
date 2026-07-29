@@ -1,11 +1,15 @@
-#include "models/gwp05/engine/engine_internal.h"
+#include "models/gwp05/cache.h"
+#include "models/gwp05/networks/mot.h"
+#include "models/gwp05/runtime.h"
 
-namespace wam::internal::gwp05::engine {
+#include <cmath>
+
+namespace wam::internal::gwp05 {
 
 bool run_unrolled_action_denoise(
-        Gwp05ModelArch & model, std::vector<float> & action,
+        ExecutionState & model, std::vector<float> & action,
         const std::vector<float> & timesteps, const std::vector<float> & sigmas) {
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t tokens = cfg.action_chunk;
     if (!prefix_storage_is_valid(model) || !action_prompt_cache_enabled(model) ||
         !prompt_kv_cache_enabled(model) ||
@@ -100,7 +104,7 @@ bool run_unrolled_action_denoise(
     return true;
 }
 
-bool run_cached_action_step(Gwp05ModelArch & model,
+bool run_cached_action_step(ExecutionState & model,
                             const std::vector<float> & action,
                             const std::vector<float> & prompt,
                             float timestep, float dt, bool upload_action,
@@ -108,7 +112,7 @@ bool run_cached_action_step(Gwp05ModelArch & model,
                             std::vector<float> * action_host,
                             int step) {
     NativeActionRegion native_region(model);
-    const Config & cfg = model.cfg;
+    const ModelGeometry & cfg = model.cfg;
     const int64_t tokens = cfg.action_chunk;
     if (!prefix_storage_is_valid(model)) return false;
     if (!model.cached_action_graph) model.cached_action_graph = std::make_unique<CachedActionGraph>();
@@ -374,4 +378,4 @@ bool run_cached_action_step(Gwp05ModelArch & model,
     }
     return true;
 }
-} // namespace wam::internal::gwp05::engine
+} // namespace wam::internal::gwp05

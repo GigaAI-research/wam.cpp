@@ -4,7 +4,7 @@
 #include "support/test_utils.h"
 
 #include "artifact/gguf_reader.h"
-#include "models/gwp05/artifact.h"
+#include "models/gwp05/contract.h"
 #include "models/gwp05/inputs.h"
 #include "policy/policy_spec.h"
 
@@ -70,7 +70,7 @@ int main() {
     const auto reader = artifact_view.shared_gguf();
     const auto spec =
         *wam::internal::policy::try_read_policy_spec(artifact_view);
-    const auto artifact = wam::internal::gwp05::load_artifact(reader, spec);
+    const auto artifact = wam::internal::gwp05::load_contract(reader, spec);
 
     const std::array<std::uint8_t, 12> scene{};
     const std::array<std::uint8_t, 12> left{};
@@ -111,6 +111,27 @@ int main() {
             "GWP token padding was not canonicalized");
     require(prepared.observation.action_noise == noise,
             "GWP explicit action noise was not retained");
+    std::mt19937 explicit_rng(77);
+    std::mt19937 explicit_baseline(77);
+    (void) wam::internal::gwp05::prepare_inputs(
+        inputs, *artifact, spec, wam::LanguageRuntimeMode::tokens,
+        explicit_rng);
+    require(explicit_rng() == explicit_baseline(),
+            "explicit GWP action noise must not consume Session RNG state");
+
+    wam::Observation generated_noise_inputs = inputs;
+    generated_noise_inputs.action_noise = {};
+    std::mt19937 first_rng(91);
+    std::mt19937 second_rng(91);
+    const auto first_generated = wam::internal::gwp05::prepare_inputs(
+        generated_noise_inputs, *artifact, spec,
+        wam::LanguageRuntimeMode::tokens, first_rng);
+    const auto second_generated = wam::internal::gwp05::prepare_inputs(
+        generated_noise_inputs, *artifact, spec,
+        wam::LanguageRuntimeMode::tokens, second_rng);
+    require(first_generated.observation.action_noise ==
+                second_generated.observation.action_noise,
+            "equal GWP Session seeds must reproduce generated action noise");
 
     std::vector<float> embedding_values(2 * 64, 0.125F);
     std::vector<std::int32_t> embedding_mask = {1, 1};

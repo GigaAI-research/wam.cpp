@@ -547,6 +547,21 @@ SessionConfig 包含：
 
 验收：UMT5、VAE、MoT、denoise、cache 分阶段 parity；显式 noise 确定性；reset 恢复 seed/cache；多 Session 生命周期；GWP05 RoboTwin 最终 action parity 和 simulator smoke 通过。
 
+完成状态：
+
+- 已按机械迁移优先原则将原 `engine/` 中的 UMT5、Vision VAE 和 MoT 数学分别移动到 `networks/umt5.*`、`networks/vision_vae.*` 和 `networks/mot.*`；Tensor 名称、算子顺序、flow schedule 和 action projection 数学未做设计性改写。
+- 已将 GWP05 的 Artifact 语义收敛为 `Gwp05Contract`。`contract.*` 负责模型特有 metadata、Tensor/geometry 约束和不可变配置；通用 GGUF 读取与 Tensor schema 仍留在 `src/artifact/`。VAE latent 统计值由 Contract 读取，只有创建计算资源时才执行运行时完整性校验，metadata-only inspect/validate 不被计算后端要求污染。
+- 已删除旧 `src/models/gwp05/engine/` 和 `engine_internal.h` 总线头文件。`model.cpp` 直接实现 `ModelImpl`/`SessionImpl` 生命周期，不再建立 `Engine/EngineSession` 对象；源码边界测试禁止恢复旧目录、总线头或 GWP05 私有 `engine` namespace。
+- 已拆分 `ModelResources`、`SessionState`、`Pipeline`、`Cache`、模型本地 runtime/resource helper 和 network 接口。共享 Backend/WeightStore 由 `ModelResources` 独占，Session 只持有独立可变图与 cache 状态；共享资源上的执行 mutex 明确当前多 Session 可创建但串行执行的线程安全语义。
+- `pipeline.*` 只负责资源装配、一次推理的数据流、flow loop 和 telemetry 汇总；prompt/prefix/KV/graph cache 位于 `cache.*`，action encoder/decoder projection 位于 MoT network。`networks/` 不允许依赖 Artifact parser、Policy、Model 或 Serving。
+- 已增加显式 noise 不消耗 Session RNG、相同 seed 生成相同 noise、Session cache 隔离、reset 清理 cache/counter 以及旧边界不可恢复的默认测试；既有外部 reference gate 已迁移为 Pipeline/SessionState 接口，并继续覆盖 UMT5、VAE、MoT、denoise、cache、reset 和多 Session 路径。
+- 本地验证结果：默认 CPU 36/36、关闭 GWP05/FastWAM/Serving 的 Runtime-only 25/25、CUDA 12.4 + cuDNN + `sm_80` 36/36；安装消费和源码边界测试包含在上述矩阵中。
+
+待完成的外部门禁：
+
+- 当前构建未配置 `WAM_TEST_GWP05_REAL_GGUF`、`WAM_TEST_GWP05_MATERIALIZED_INPUT_DIR`、`WAM_TEST_GWP05_STAGE_ROOT`、RoboTwin GGUF/输入/reference 目录及 donor replay 路径，因此真实权重的分阶段 parity、最终 action parity 和 simulator smoke 尚未执行。
+- Phase 5 的结构迁移与默认验收已经完成；在上述真实资产门禁全部通过前，不把 GWP05 数值迁移和 RoboTwin 验收标记为最终完成，也不进入会改变 GWP05 数学的优化。
+
 ### Phase 6：迁移 FastWAM
 
 - 机械迁移 Vision VAE、ProprioProjector、VideoDiT、ActionDiT。
