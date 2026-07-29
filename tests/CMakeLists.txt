@@ -45,6 +45,16 @@ wam_add_test(wam_header_session_contract contracts/header_session.cpp)
 wam_add_test(wam_header_pipeline_contract contracts/header_pipeline.cpp)
 wam_add_test(wam_header_version_contract contracts/header_version.cpp)
 wam_add_test(wam_header_c_api_contract contracts/header_c_api.cpp)
+if(WAM_BUILD_SERVING)
+    add_executable(wam_c_api_v4 integration/c_api_v4.cpp)
+    target_link_libraries(wam_c_api_v4 PRIVATE wam::c_api wam_test_fixtures)
+    target_include_directories(wam_c_api_v4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(wam_c_api_v4 PRIVATE cxx_std_17)
+    target_compile_options(wam_c_api_v4 PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>)
+    add_test(NAME wam_c_api_v4 COMMAND wam_c_api_v4)
+    set_tests_properties(wam_c_api_v4 PROPERTIES LABELS "contract;c-api")
+endif()
 wam_add_test(wam_types_unit unit/types.cpp)
 wam_add_test(wam_registry_unit unit/model_registry.cpp)
 add_executable(wam_runtime_backend_unit unit/runtime_backend.cpp)
@@ -94,7 +104,38 @@ if(WAM_BUILD_APPS)
             -DWAM_CLI_TEST_ROOT=${PROJECT_BINARY_DIR}/tests/cli-artifact
             -P ${CMAKE_CURRENT_SOURCE_DIR}/integration/artifact_cli.cmake)
     set_tests_properties(wam_artifact_cli PROPERTIES LABELS "artifact;cli")
+
+    if(WAM_BUILD_SERVING)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME wam_python_sdk
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/python/test_sdk.py
+                --library $<TARGET_FILE:wam_c_api>
+                --fixture-writer $<TARGET_FILE:wam_cli_fixture_writer>)
+        set_tests_properties(wam_python_sdk PROPERTIES
+            LABELS "python;c-api"
+            ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python")
+    endif()
 endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME wam_python_wheel
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/python/test_wheel.py
+        --source ${PROJECT_SOURCE_DIR})
+set_tests_properties(wam_python_wheel PROPERTIES
+    LABELS "python;install" TIMEOUT 180 RUN_SERIAL TRUE)
+add_test(NAME wam_python_resources
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/python/test_resources.py)
+set_tests_properties(wam_python_resources PROPERTIES
+    LABELS "python;artifact"
+    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/python")
+
+add_library(wam_cpp_predict_example OBJECT
+    ${PROJECT_SOURCE_DIR}/examples/cpp/predict.cpp)
+target_link_libraries(wam_cpp_predict_example PRIVATE wam::core)
+target_compile_features(wam_cpp_predict_example PRIVATE cxx_std_17)
 
 add_test(NAME wam_source_boundaries
     COMMAND ${CMAKE_COMMAND}

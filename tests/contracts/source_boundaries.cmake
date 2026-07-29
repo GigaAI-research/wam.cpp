@@ -56,7 +56,7 @@ wam_assert_no_match(
     ${gwp05_sources})
 wam_assert_no_match(
     "GWP05 network code depends on artifact, policy, model, or serving"
-    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/)"
+    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/|bindings/)"
     ${gwp05_network_sources})
 file(GLOB_RECURSE fastwam_sources
     "${WAM_SOURCE_DIR}/src/models/fastwam/*.h"
@@ -75,7 +75,7 @@ wam_assert_no_match(
     ${fastwam_sources})
 wam_assert_no_match(
     "FastWAM network code depends on artifact, policy, model, or serving"
-    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/)"
+    "#[ \\t]*include[ \\t]*[<\"](artifact/|policy/|model_internal|serving/|bindings/)"
     ${fastwam_network_sources})
 wam_assert_no_match(
     "GWP05 code depends on FastWAM"

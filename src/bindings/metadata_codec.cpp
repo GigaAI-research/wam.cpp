@@ -1,4 +1,4 @@
-#include "serving/protocol_adapter.h"
+#include "bindings/metadata_codec.h"
 
 #include "wam/version.h"
 
@@ -6,7 +6,7 @@
 #include <sstream>
 #include <type_traits>
 
-namespace wam::serving {
+namespace wam::bindings {
 namespace {
 
 std::string quote(const std::string & value) {
@@ -264,4 +264,4 @@ std::string error_details_json(const std::vector<ErrorDetail> & details) {
     return output.str();
 }
 
-} // namespace wam::serving
+} // namespace wam::bindings

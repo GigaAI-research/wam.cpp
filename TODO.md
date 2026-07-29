@@ -599,6 +599,20 @@ SessionConfig 包含：
 
 验收：同一输入/seed 的 C++、C ABI、Python 本地输出一致；wheel 安装、context manager、错误映射和资源释放测试通过。
 
+Phase 7 实施结果：
+
+- C ABI 已破坏式升级为 v4。所有公开输入/输出 struct 均携带 `struct_version` 与 `struct_size`，输入通过对应 `wam_c_*_init` 建立默认值；Model/Session handle、metadata string、Prediction 和 Error 均有唯一匹配的释放函数，所有 free 接受 `NULL`。运行时测试覆盖未知 struct version、结构化错误、metadata GGUF/bundle 加载、字符串/错误/handle ownership 和 metadata-only Session 失败路径。
+- C ABI 与 metadata JSON codec 已从 `src/serving` 迁入 `src/bindings`，Binding 只依赖公开 wam API，不再把本地绑定误归类为 Serving transport。安装消费测试同时从纯 C 程序消费安装后的 `wam::c_api`，从 C++ 程序消费 `wam::core`。
+- 已建立可构建 wheel 的正式 `python/wam` 包与 `pyproject.toml`。本地 `Model`、`Session`、`Pipeline` 和远程 `Client` 均支持 context manager；原生 ErrorCode、message 与 field-level details 映射为 `WamError`，Python 不再维护 C ABI v3 struct 布局。
+- `Pipeline.load` 同时接受 GGUF 与 bundle；`LanguageResources` 以显式参数优先、bundle manifest 次之的顺序发现 tokenizer/language encoder，禁止资源路径逃逸且不自动下载。`Pipeline.predict(..., instruction=...)` 延迟建立正式 language provider，也允许调用方直接传入 prepared tokens 或 BF16 embedding。`eval/common/native.py`、`language.py` 和 `rpc.py` 仅保留指向正式 SDK 的兼容导出，不再复制 native/client/provider 实现。
+- 已提供可编译的 C++ 最小示例、Python 原始 instruction 示例、`docs/python-sdk.md` 和 wheel console script `wam-predict`。CLI 从规范 NPZ 读取 `state`、`image.<role>` 与 raw/prepared language input，输出 JSON 或 NPY action chunk。
+- 本地验证结果：默认 CPU 41/41、关闭 GWP05/FastWAM/Serving 的 Runtime-only 27/27、CUDA 12.4 + cuDNN + `sm_80` 41/41。wheel 测试在临时源码副本中完成构建、隔离 venv 安装、正式包导入和 `wam-predict --help`，不会向源码树写入 build/egg-info 中间文件。
+
+Phase 7 尚未执行的外部门禁：
+
+- 当前构建仍未配置真实 GWP05/FastWAM GGUF、冻结 observation/noise 与独立 reference action，因此不能把“相同输入/seed 的 C++ direct、C ABI 与 Python local 数值一致”标记为已验证。Python local 直接调用 C ABI v4，结构、错误和生命周期路径已覆盖；真实数值 parity 必须复用 Phase 5/6 的外部 Gate A/Gate B 资产后再完成。
+- 远程 `Client` 在 Phase 7 正式化了用户 API 和资源生命周期，但仍封装现有 `wam.rpc.v05` wire protocol。`wam.rpc.v06`、transport-neutral service core 和 C++/Python local/WebSocket remote 的真实数值一致性属于 Phase 8，不能在本阶段提前宣称完成。
+
 ### Phase 8：Serving、Adapter 和 Eval
 
 - 将 Proto 升级为 `wam.rpc.v06`。

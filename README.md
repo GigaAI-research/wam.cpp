@@ -64,7 +64,7 @@ client infer, RPC, and server-total means were `132.29`, `130.77`, and `124.98 m
 A800 BF16 server. See `eval/sim/ROBOTWIN_REMOTE_EVAL.md` for the manifest digest, latency
 groups, and result paths.
 
-## Verified checkpoint (2026-07-28)
+## Verified checkpoint (2026-07-29)
 
 The current vertical implementation passes Release CPU and CUDA 12.4 builds. The CPU build
 passes all 20 configured tests. The A800 `sm_80` CUDA build passes all 24 configured tests,
@@ -74,3 +74,12 @@ gates. A real prediction through the Python/C ABI bridge returns the expected `[
 GWP05 action and preserves the engine's named vision, text, prefill, and decode timings.
 External GGUF, numerical fixtures, checkpoints, simulator checkouts, and raw rollout results
 remain outside Git.
+
+Phase 7 publishes C ABI v4 and the installable `wam` Python SDK. The current default CPU
+and CUDA 12.4 + cuDNN `sm_80` matrices each pass 41/41 tests; the Runtime-only build with
+GWP05, FastWAM, and Serving disabled passes 27/27. These matrices include pure-C and C++
+install consumers, wheel build and isolated installation, context-managed native loading,
+structured error ownership, bundle language-resource discovery, and the `wam-predict`
+entry point. See `docs/python-sdk.md`. Real-model cross-language parity remains an opt-in
+external gate because its GGUF, frozen observations, and reference actions are not stored
+in Git.

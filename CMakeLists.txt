@@ -226,8 +226,8 @@ target_link_libraries(wam_core_build INTERFACE
 
 if(WAM_BUILD_SERVING)
     add_library(wam_c_api SHARED
-        src/serving/c_api.cpp
-        src/serving/protocol_adapter.cpp)
+        src/bindings/c_api.cpp
+        src/bindings/metadata_codec.cpp)
     add_library(wam::c_api ALIAS wam_c_api)
     target_link_libraries(wam_c_api PRIVATE wam::core)
     target_include_directories(wam_c_api

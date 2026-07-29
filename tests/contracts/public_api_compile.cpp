@@ -19,7 +19,7 @@ static_assert(!std::is_copy_constructible<wam::Session>::value,
               "Session must not be copyable");
 static_assert(sizeof(wam_c_model_options) > 0,
               "serving C ABI options must be complete");
-static_assert(WAM_C_ABI_VERSION == 3U, "unexpected serving C ABI version");
+static_assert(WAM_C_ABI_VERSION == 4U, "unexpected serving C ABI version");
 
 int main() {
     wam::Observation observation;
