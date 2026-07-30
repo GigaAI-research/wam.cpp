@@ -33,6 +33,26 @@ const ggml_backend::DebugDump & ModelResources::debug_dump() const noexcept {
     return *debug_dump_;
 }
 
+DeviceVideoKvCache & ModelResources::video_cache() noexcept {
+    return video_cache_;
+}
+
+UnrolledActionGraph * ModelResources::action_graph() noexcept {
+    return action_graph_.get();
+}
+
+void ModelResources::reset_action_graph() noexcept { action_graph_.reset(); }
+
+void ModelResources::set_action_graph(
+    std::unique_ptr<UnrolledActionGraph> graph) {
+    action_graph_ = std::move(graph);
+}
+
+std::uint64_t ModelResources::execution_device_bytes() const noexcept {
+    return video_cache_.bytes() +
+        (action_graph_ ? action_graph_->bytes() : 0);
+}
+
 bool ModelResources::initialize(const FastWamContract & contract,
                                 int device_index) {
 #ifdef GGML_USE_CUDA

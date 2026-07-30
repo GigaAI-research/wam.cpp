@@ -1,6 +1,8 @@
 #pragma once
 
 #include "models/fastwam/contract.h"
+#include "models/fastwam/graphs.h"
+#include "models/fastwam/scheduler.h"
 #include "models/fastwam/state.h"
 
 #include "ggml.h"
@@ -10,24 +12,14 @@
 
 namespace wam::internal::fastwam {
 
-struct VideoKvLayer {
-    std::vector<ggml_bf16_t> key;
-    std::vector<ggml_bf16_t> value;
-};
-
-struct VideoKvCache {
-    std::size_t tokens = 0;
-    std::vector<VideoKvLayer> layers;
-};
-
-std::vector<float> run_action_dit_step(
+std::vector<float> run_unrolled_action_denoise(
     ModelResources & resources, const FastWamContract & artifact,
     const std::vector<ggml_bf16_t> & action_input,
     const std::vector<ggml_bf16_t> & context,
     std::size_t context_tokens,
     const std::vector<std::int32_t> & context_mask,
-    const VideoKvCache & video_cache,
-    float timestep,
+    const DeviceVideoKvCache & video_cache,
+    const FlowSchedule & schedule,
     const std::vector<std::int32_t> & positions);
 
 } // namespace wam::internal::fastwam

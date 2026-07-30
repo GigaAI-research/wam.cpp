@@ -171,6 +171,7 @@ endif()
 if(WAM_BUILD_FASTWAM)
     add_library(wam_model_fastwam OBJECT
         src/models/fastwam/contract.cpp
+        src/models/fastwam/graphs.cpp
         src/models/fastwam/inputs.cpp
         src/models/fastwam/module.cpp
         src/models/fastwam/model.cpp

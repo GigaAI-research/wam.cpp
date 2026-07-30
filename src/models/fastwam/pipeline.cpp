@@ -177,20 +177,17 @@ CoreAction run_pipeline(ModelResources & resources, SessionState & state,
                            result.stats.model_vision_milliseconds);
 
     phase_begin = Clock::now();
-    const VideoKvCache video_cache = prefill_video_cache(
-        resources, contract, latent, context, context_mask, context_tokens);
+    DeviceVideoKvCache & video_cache = resources.video_cache();
+    prefill_video_cache(resources, contract, latent, context, context_mask,
+                        context_tokens, video_cache);
     if (resources.debug_dump().enabled()) {
-        const std::vector<std::int64_t> cache_shape = {
-            static_cast<std::int64_t>(video_cache.tokens),
-            static_cast<std::int64_t>(geometry.num_heads),
-            static_cast<std::int64_t>(geometry.attn_head_dim)};
         for (std::uint32_t layer = 0; layer < geometry.num_layers; ++layer) {
             const std::string index = layer < 10
                 ? "0" + std::to_string(layer) : std::to_string(layer);
-            resources.debug_dump().write("video_k_" + index, video_cache.layers[layer].key,
-                        cache_shape);
-            resources.debug_dump().write("video_v_" + index, video_cache.layers[layer].value,
-                        cache_shape);
+            resources.debug_dump().write_tensor(
+                "video_k_" + index, video_cache.key(layer));
+            resources.debug_dump().write_tensor(
+                "video_v_" + index, video_cache.value(layer));
         }
     }
     result.stats.model_prefill_milliseconds = elapsed_ms(phase_begin);
@@ -207,33 +204,17 @@ CoreAction run_pipeline(ModelResources & resources, SessionState & state,
     const std::vector<std::int32_t> positions =
         semantics::action_positions(contract.sequence_geometry);
     phase_begin = Clock::now();
-    std::vector<float> action_f32(action.size());
-    for (std::size_t step = 0; step < schedule.steps(); ++step) {
-        const std::vector<float> velocity = run_action_dit_step(
-            resources, contract, action, context, context_tokens, context_mask,
-            video_cache, schedule.timesteps[step], positions);
-        const std::string step_name = step + 1 < 10
-            ? "0" + std::to_string(step + 1)
-            : std::to_string(step + 1);
-        resources.debug_dump().write("action_velocity_" + step_name, velocity, action_shape);
-        for (std::size_t index = 0; index < action.size(); ++index) {
-            const ggml_bf16_t product = ggml_fp32_to_bf16(
-                velocity[index] * schedule.deltas[step]);
-            action_f32[index] = ggml_bf16_to_fp32(action[index]) +
-                ggml_bf16_to_fp32(product);
-            action[index] = ggml_fp32_to_bf16(action_f32[index]);
-        }
-        resources.debug_dump().write("action_state_" + step_name, action, action_shape);
-    }
+    std::vector<float> action_f32 = run_unrolled_action_denoise(
+        resources, contract, action, context, context_tokens, context_mask,
+        video_cache, schedule, positions);
     result.stats.model_decode_milliseconds = elapsed_ms(phase_begin);
     runtime::append_timing(result.stats, "action_denoise",
                            result.stats.model_decode_milliseconds);
-    ggml_bf16_to_fp32_row(action.data(), action_f32.data(),
-                          static_cast<std::int64_t>(action.size()));
     resources.debug_dump().write("action_normalized", action_f32, action_shape);
     result.values = std::move(action_f32);
     result.stats.model_milliseconds = elapsed_ms(model_begin);
-    result.stats.peak_device_memory_bytes = resources.resident_device_bytes;
+    result.stats.peak_device_memory_bytes = resources.resident_device_bytes +
+        resources.execution_device_bytes();
     ++state.prediction_count;
     return result;
 }

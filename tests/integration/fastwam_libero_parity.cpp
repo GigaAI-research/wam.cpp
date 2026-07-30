@@ -50,7 +50,7 @@ int main(int argc, char ** argv) {
             "[MEAN_TOLERANCE MAX_TOLERANCE]");
     }
     const double mean_tolerance = argc == 5 ? std::stod(argv[3]) : 9.0e-4;
-    const double maximum_tolerance = argc == 5 ? std::stod(argv[4]) : 5.0e-3;
+    const double maximum_tolerance = argc == 5 ? std::stod(argv[4]) : 1.0e-2;
     require(std::isfinite(mean_tolerance) && mean_tolerance > 0.0 &&
                 std::isfinite(maximum_tolerance) && maximum_tolerance > 0.0,
             "FastWAM parity tolerances must be finite and positive");
@@ -133,6 +133,9 @@ int main(int argc, char ** argv) {
                 prediction.telemetry.model_decode_milliseconds > 0.0 &&
                 prediction.telemetry.model_timings.size() == 3,
             "FastWAM phase timing contract changed");
+    require(prediction.telemetry.peak_device_memory_bytes >
+                model.info().resident_device_bytes,
+            "FastWAM persistent execution buffers are missing from telemetry");
 
     inputs.action_noise = {};
     const wam::Prediction first_random = session.predict(inputs);

@@ -1,12 +1,13 @@
 {
-  "format": "wam-fastwam-libero-gate-b-contract-v1",
+  "format": "wam-fastwam-libero-gate-b-contract-v2",
   "reference_source": {
     "fastwam_revision": "45d8e1458921d83f8ad6cf9ce993d371208dabd0",
     "checkpoint": "checkpoints/fastwam_release/libero_uncond_2cam224.pt",
     "checkpoint_size_bytes": 12041735140,
     "normalization": "checkpoints/fastwam_release/libero_uncond_2cam224_dataset_stats.json",
     "normalization_size_bytes": 40939,
-    "vae": "checkpoints/DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors"
+    "vae": "checkpoints/DiffSynth-Studio/Wan-Series-Converted-Safetensors/Wan2.2_VAE.safetensors",
+    "num_inference_steps": 10
   },
   "profile": "fastwam_libero_2cam224_minmax",
   "variant": "uncond_action_only",
@@ -19,7 +20,7 @@
     "action_horizon": 32,
     "context_length": 128,
     "text_dimension": 4096,
-    "inference_steps": 20
+    "inference_steps": 10
   },
   "fixture": {
     "images": [[224, 224, 3], [224, 224, 3]],
@@ -28,20 +29,9 @@
     "attention_mask": [128],
     "action_noise": [32, 7]
   },
-  "donor_artifact": {
-    "size_bytes": 12150323744,
-    "tensor_count": 1749,
-    "components": {
-      "video": 825,
-      "action": 824,
-      "vae": 86,
-      "proprio": 2,
-      "stats": 12
-    }
-  },
   "target_artifact": {
     "conversion_policy": "fastwam-bf16-policy-v2",
-    "size_bytes": 12150326336,
+    "size_bytes": 12150326144,
     "tensor_count": 1741,
     "model_norm_epsilon": 0.000001,
     "policy_normalization_epsilon": 0.00000001,
@@ -53,23 +43,13 @@
       "stats": 4
     }
   },
-  "donor_parity": {
+  "official_pytorch_parity": {
     "action_shape": [32, 7],
-    "mean_absolute_error": 0.0009015057502048356,
+    "mean_absolute_error": 0.0008533821840371404,
     "maximum_absolute_error": 0.0054931640625,
-    "mean_tolerance": 0.001,
+    "mean_tolerance": 0.0009,
     "maximum_tolerance": 0.01,
-    "final_action_passed": true,
-    "strict_all_intermediate_tensors_passed": false
-  },
-  "target_parity": {
-    "action_shape": [32, 7],
-    "mean_absolute_error": 0.0009015057502048356,
-    "maximum_absolute_error": 0.0054931640625,
-    "mean_tolerance": 0.001,
-    "maximum_tolerance": 0.01,
-    "final_action_passed": true,
-    "bit_identical_to_donor_final_action": true
+    "final_action_passed": true
   },
   "public_scope": {
     "action_output": true,

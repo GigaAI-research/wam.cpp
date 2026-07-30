@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
 
 namespace wam::internal::fastwam {
@@ -136,113 +137,184 @@ std::vector<float> build_context_mask(
     return result;
 }
 
+ggml_tensor * build_action_velocity(
+    ggml_context * ctx, ModelResources & resources, const Geometry & g,
+    ggml_tensor * action, ggml_tensor * projected_context,
+    ggml_tensor * frequencies, ggml_tensor * positions,
+    ggml_tensor * context_attention_mask,
+    const DeviceVideoKvCache & video_cache) {
+    ggml_tensor * hidden = ops::linear(
+        ctx, ops::require_weight(resources, "fastwam.action.encoder.weight"),
+        ops::require_weight(resources, "fastwam.action.encoder.bias"), action);
+    ggml_tensor * timestep = ops::linear(
+        ctx, ops::require_weight(resources, "fastwam.action.time.0.weight"),
+        ops::require_weight(resources, "fastwam.action.time.0.bias"), frequencies);
+    timestep = as_bf16(ctx, ggml_silu(ctx, as_f32(ctx, timestep)));
+    timestep = ops::linear(
+        ctx, ops::require_weight(resources, "fastwam.action.time.2.weight"),
+        ops::require_weight(resources, "fastwam.action.time.2.bias"), timestep);
+    timestep = as_bf16(ctx, ggml_silu(ctx, as_f32(ctx, timestep)));
+    timestep = ops::linear(
+        ctx, ops::require_weight(resources, "fastwam.action.timep.1.weight"),
+        ops::require_weight(resources, "fastwam.action.timep.1.bias"), timestep);
+    timestep = as_f32(ctx, timestep);
+
+    for (std::uint32_t layer = 0; layer < g.num_layers; ++layer) {
+        hidden = block(
+            ctx, resources, static_cast<int>(layer), hidden,
+            projected_context, timestep, positions, video_cache.key(layer),
+            video_cache.value(layer), context_attention_mask,
+            g.action_hidden_dim, g.action_horizon, g.num_heads,
+            g.attn_head_dim, g.norm_eps);
+    }
+    return as_f32(ctx, ops::linear(
+        ctx, ops::require_weight(resources, "fastwam.action.head.weight"),
+        ops::require_weight(resources, "fastwam.action.head.bias"), hidden));
+}
+
 } // namespace
 
-std::vector<float> run_action_dit_step(
+std::vector<float> run_unrolled_action_denoise(
     ModelResources & resources, const FastWamContract & artifact,
     const std::vector<ggml_bf16_t> & action_input,
     const std::vector<ggml_bf16_t> & context,
     std::size_t context_tokens,
     const std::vector<std::int32_t> & context_mask,
-    const VideoKvCache & video_cache,
-    float timestep,
+    const DeviceVideoKvCache & video_cache,
+    const FlowSchedule & schedule,
     const std::vector<std::int32_t> & positions) {
     const Geometry & g = artifact.geometry;
     const std::size_t expected_action = static_cast<std::size_t>(g.action_horizon) * g.action_dim;
     const std::size_t expected_context = context_tokens * g.text_dim;
-    const std::size_t cache_elements = video_cache.tokens * g.num_heads * g.attn_head_dim;
     if (action_input.size() != expected_action || context.size() != expected_context ||
         context_mask.size() != context_tokens ||
-        positions.size() != g.action_horizon || video_cache.tokens == 0 ||
-        video_cache.layers.size() != g.num_layers) {
+        positions.size() != g.action_horizon || schedule.steps() == 0 ||
+        schedule.deltas.size() != schedule.steps() ||
+        !video_cache.matches(g.num_layers,
+                             artifact.sequence_geometry.video_tokens,
+                             g.num_heads, g.attn_head_dim)) {
         throw Error(ErrorCode::invalid_argument, "FastWAM action graph input shape mismatch");
     }
-    ggml_backend::GraphContext graph_context(512u * 1024u * 1024u);
-    ggml_context * ctx = graph_context.get();
+    const UnrolledActionGraph * existing = resources.action_graph();
+    const bool incompatible_graph = existing &&
+        (existing->context_tokens != context_tokens ||
+         existing->video_tokens != video_cache.tokens() ||
+         existing->steps != schedule.steps());
+    if (incompatible_graph) resources.reset_action_graph();
+    if (resources.action_graph() == nullptr) {
+        auto candidate = std::make_unique<UnrolledActionGraph>();
+        UnrolledActionGraph & built = *candidate;
+        built.context_tokens = context_tokens;
+        built.video_tokens = video_cache.tokens();
+        built.steps = schedule.steps();
+        ggml_context * ctx = built.get();
 
-    ggml_tensor * action = ggml_new_tensor_2d(
-        ctx, GGML_TYPE_BF16, g.action_dim, g.action_horizon);
-    ggml_tensor * context_input = ggml_new_tensor_2d(
-        ctx, GGML_TYPE_BF16, g.text_dim, context_tokens);
-    ggml_tensor * freqs = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
-    ggml_tensor * position_input = ggml_new_tensor_1d(
-        ctx, GGML_TYPE_I32, g.action_horizon);
-    ggml_tensor * context_attention_mask = ggml_new_tensor_3d(
-        ctx, GGML_TYPE_F32, context_tokens, g.action_horizon, g.num_heads);
-    ggml_set_input(action); ggml_set_input(context_input);
-    ggml_set_input(freqs); ggml_set_input(position_input);
-    ggml_set_input(context_attention_mask);
-
-    ggml_tensor * hidden = ops::linear(
-        ctx, ops::require_weight(resources, "fastwam.action.encoder.weight"),
-        ops::require_weight(resources, "fastwam.action.encoder.bias"), action);
-    ggml_tensor * text = ops::linear_gelu(
-        ctx, ops::require_weight(resources, "fastwam.action.text.0.weight"),
-        ops::require_weight(resources, "fastwam.action.text.0.bias"),
-        ops::require_weight(resources, "fastwam.action.text.2.weight"),
-        ops::require_weight(resources, "fastwam.action.text.2.bias"), context_input);
-
-    ggml_tensor * t = ops::linear(
-        ctx, ops::require_weight(resources, "fastwam.action.time.0.weight"),
-        ops::require_weight(resources, "fastwam.action.time.0.bias"), freqs);
-    t = as_bf16(ctx, ggml_silu(ctx, as_f32(ctx, t)));
-    t = ops::linear(ctx, ops::require_weight(resources, "fastwam.action.time.2.weight"),
-                    ops::require_weight(resources, "fastwam.action.time.2.bias"), t);
-    t = as_bf16(ctx, ggml_silu(ctx, as_f32(ctx, t)));
-    t = ops::linear(ctx, ops::require_weight(resources, "fastwam.action.timep.1.weight"),
-                    ops::require_weight(resources, "fastwam.action.timep.1.bias"), t);
-    t = as_f32(ctx, t);
-    std::vector<ggml_tensor *> video_keys;
-    std::vector<ggml_tensor *> video_values;
-    video_keys.reserve(g.num_layers);
-    video_values.reserve(g.num_layers);
-    for (std::uint32_t layer = 0; layer < g.num_layers; ++layer) {
-        if (video_cache.layers[layer].key.size() != cache_elements ||
-            video_cache.layers[layer].value.size() != cache_elements) {
-            throw Error(ErrorCode::invalid_argument,
-                        "FastWAM video K/V cache layer shape mismatch",
-                        {{"layer", std::to_string(layer)}});
+        built.action_input = ggml_new_tensor_2d(
+            ctx, GGML_TYPE_BF16, g.action_dim, g.action_horizon);
+        const std::size_t action_bytes = ggml_backend_buft_get_alloc_size(
+            ggml_backend_get_default_buffer_type(resources.backend()),
+            built.action_input);
+        built.action_input_buffer =
+            ggml_backend_alloc_buffer(resources.backend(), action_bytes);
+        if (built.action_input_buffer == nullptr ||
+            ggml_backend_tensor_alloc(
+                built.action_input_buffer, built.action_input,
+                ggml_backend_buffer_get_base(built.action_input_buffer)) !=
+                GGML_STATUS_SUCCESS) {
+            throw Error(ErrorCode::resource_exhausted,
+                        "cannot allocate FastWAM action graph input");
         }
-        ggml_tensor * video_key = ggml_new_tensor_3d(
-            ctx, GGML_TYPE_BF16, g.attn_head_dim, g.num_heads, video_cache.tokens);
-        ggml_tensor * video_value = ggml_new_tensor_3d(
-            ctx, GGML_TYPE_BF16, g.attn_head_dim, g.num_heads, video_cache.tokens);
-        ggml_set_input(video_key); ggml_set_input(video_value);
-        video_keys.push_back(video_key); video_values.push_back(video_value);
-        hidden = block(ctx, resources, static_cast<int>(layer), hidden, text, t,
-                       position_input, video_key, video_value,
-                       context_attention_mask,
-                       g.action_hidden_dim, g.action_horizon,
-                       g.num_heads, g.attn_head_dim, g.norm_eps);
+        built.context_input = ggml_new_tensor_2d(
+            ctx, GGML_TYPE_BF16, g.text_dim, context_tokens);
+        built.positions = ggml_new_tensor_1d(
+            ctx, GGML_TYPE_I32, g.action_horizon);
+        built.context_attention_mask = ggml_new_tensor_3d(
+            ctx, GGML_TYPE_F32, context_tokens, g.action_horizon,
+            g.num_heads);
+        for (ggml_tensor * input : {built.context_input, built.positions,
+                                    built.context_attention_mask}) {
+            ggml_set_input(input);
+        }
+        ggml_tensor * projected_context = ops::linear_gelu(
+            ctx, ops::require_weight(resources, "fastwam.action.text.0.weight"),
+            ops::require_weight(resources, "fastwam.action.text.0.bias"),
+            ops::require_weight(resources, "fastwam.action.text.2.weight"),
+            ops::require_weight(resources, "fastwam.action.text.2.bias"),
+            built.context_input);
+
+        const bool keep_debug = resources.debug_dump().enabled();
+        ggml_tensor * step_action = built.action_input;
+        for (std::size_t step = 0; step < schedule.steps(); ++step) {
+            ggml_tensor * frequency =
+                ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
+            ggml_tensor * delta =
+                ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+            ggml_set_input(frequency);
+            ggml_set_input(delta);
+            built.frequency_inputs.push_back(frequency);
+            built.delta_inputs.push_back(delta);
+            ggml_tensor * velocity = build_action_velocity(
+                ctx, resources, g, step_action, projected_context, frequency,
+                built.positions, built.context_attention_mask, video_cache);
+            ggml_tensor * product = as_bf16(
+                ctx, ggml_mul(ctx, velocity, delta));
+            step_action = as_bf16(
+                ctx, ggml_add(ctx, as_f32(ctx, step_action),
+                              as_f32(ctx, product)));
+            if (keep_debug) {
+                ggml_set_output(velocity);
+                ggml_set_output(step_action);
+                built.debug_velocities.push_back(velocity);
+                built.debug_action_states.push_back(step_action);
+            }
+        }
+        built.action_output = as_f32(ctx, step_action);
+        ggml_set_output(built.action_output);
+        built.graph = ggml_new_graph_custom(ctx, 262144, false);
+        ggml_build_forward_expand(built.graph, built.action_output);
+        for (std::size_t step = 0; step < built.debug_velocities.size(); ++step) {
+            ggml_build_forward_expand(built.graph, built.debug_velocities[step]);
+            ggml_build_forward_expand(built.graph, built.debug_action_states[step]);
+        }
+        ggml_graph_assign_uid(built.graph);
+        built.allocate(
+            built.graph,
+            ggml_backend_get_default_buffer_type(resources.backend()));
+        resources.debug_dump().audit_mixed_binary_nodes(
+            "fastwam_action_unrolled", built.graph);
+        resources.set_action_graph(std::move(candidate));
     }
-    ggml_tensor * output = ops::linear(
-        ctx, ops::require_weight(resources, "fastwam.action.head.weight"),
-        ops::require_weight(resources, "fastwam.action.head.bias"), hidden);
-    output = as_f32(ctx, output);
-    ggml_set_output(output);
-    ggml_cgraph * graph = ggml_new_graph_custom(ctx, 65536, false);
-    ggml_build_forward_expand(graph, output);
-    graph_context.allocate(
-        graph, ggml_backend_get_default_buffer_type(resources.backend()));
-    ggml_backend::set_bf16(action, action_input);
-    ggml_backend::set_bf16(context_input, context);
-    const std::vector<float> frequency = sinusoidal(timestep, 256);
-    ggml_backend::set_f32(freqs, frequency);
-    ggml_backend_tensor_set(position_input, positions.data(), 0,
+
+    UnrolledActionGraph & graph = *resources.action_graph();
+    ggml_backend::set_bf16(graph.action_input, action_input);
+    ggml_backend::set_bf16(graph.context_input, context);
+    ggml_backend_tensor_set(graph.positions, positions.data(), 0,
                             positions.size() * sizeof(std::int32_t));
     const std::vector<float> mask = build_context_mask(
         context_mask, g.action_horizon, g.num_heads);
-    ggml_backend::set_f32(context_attention_mask, mask);
-    for (std::uint32_t layer = 0; layer < g.num_layers; ++layer) {
-        ggml_backend::set_bf16(video_keys[layer],
-                               video_cache.layers[layer].key);
-        ggml_backend::set_bf16(video_values[layer],
-                               video_cache.layers[layer].value);
+    ggml_backend::set_f32(graph.context_attention_mask, mask);
+    for (std::size_t step = 0; step < schedule.steps(); ++step) {
+        ggml_backend::set_f32(
+            graph.frequency_inputs[step],
+            sinusoidal(schedule.timesteps[step], 256));
+        ggml_backend_tensor_set(
+            graph.delta_inputs[step], &schedule.deltas[step], 0,
+            sizeof(schedule.deltas[step]));
     }
-    if (ggml_backend_graph_compute(resources.backend(), graph) != GGML_STATUS_SUCCESS) {
-        throw Error(ErrorCode::inference_failed, "FastWAM ActionDiT graph execution failed");
+    if (ggml_backend_graph_compute(resources.backend(), graph.graph) !=
+        GGML_STATUS_SUCCESS) {
+        throw Error(ErrorCode::inference_failed,
+                    "FastWAM unrolled ActionDiT graph execution failed");
     }
-    return ggml_backend::get_f32(output);
+    for (std::size_t step = 0; step < graph.debug_velocities.size(); ++step) {
+        const std::string index = step + 1 < 10
+            ? "0" + std::to_string(step + 1) : std::to_string(step + 1);
+        resources.debug_dump().write_tensor(
+            "action_velocity_" + index, graph.debug_velocities[step]);
+        resources.debug_dump().write_tensor(
+            "action_state_" + index, graph.debug_action_states[step]);
+    }
+    return ggml_backend::get_f32(graph.action_output);
 }
 
 } // namespace wam::internal::fastwam

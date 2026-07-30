@@ -34,6 +34,7 @@ int main(int argc, char ** argv) {
     require(artifact->geometry.proprio_dim == 8 &&
                 artifact->geometry.action_dim == 7 &&
                 artifact->geometry.action_horizon == 32 &&
+                artifact->geometry.inference_steps == 10 &&
                 std::fabs(artifact->geometry.norm_eps - 1.0e-6F) < 1.0e-12F,
             "FastWAM policy geometry changed");
     require(std::fabs(policy_spec->action.normalization.epsilon - 1.0e-8F) <

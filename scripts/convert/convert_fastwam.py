@@ -213,7 +213,7 @@ def main() -> int:
     parser.add_argument("--norm-stats", type=Path, required=True)
     parser.add_argument("--policy-profile", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inference-steps", type=int, required=True)
     parser.add_argument("--action-shift", type=float, default=5.0)
     parser.add_argument("--video-shift", type=float, default=5.0)
     parser.add_argument("--norm-eps", type=float, default=1.0e-6)

@@ -92,6 +92,15 @@ int main() {
     auto resources = std::make_shared<ModelResources>(
         std::make_shared<wam::internal::runtime::Logger>(wam::RuntimeConfig{}),
         std::make_shared<wam::internal::ggml_backend::DebugDump>());
+    DeviceVideoKvCache & video_cache = resources->video_cache();
+    require(!video_cache.matches(1, 1, 1, 1) &&
+                video_cache.layers() == 0 && video_cache.tokens() == 0 &&
+                video_cache.bytes() == 0,
+            "FastWAM device K/V cache must start empty");
+    require_error(
+        [&] { (void) video_cache.key(0); },
+        wam::ErrorCode::invalid_argument,
+        "FastWAM empty device K/V cache must reject layer access");
     auto first_state = create_session_state();
     auto second_state = create_session_state();
     require(first_state.get() != second_state.get(),

@@ -151,12 +151,12 @@ std::vector<float> cross_mask(const std::vector<std::int32_t> & valid,
 
 } // namespace
 
-VideoKvCache prefill_video_cache(
+void prefill_video_cache(
     ModelResources & resources, const FastWamContract & artifact,
     const std::vector<ggml_bf16_t> & latent,
     const std::vector<ggml_bf16_t> & context,
     const std::vector<std::int32_t> & context_mask,
-    std::size_t context_tokens) {
+    std::size_t context_tokens, DeviceVideoKvCache & cache) {
     const Geometry & g = artifact.geometry;
     const semantics::SequenceGeometry & sequence = artifact.sequence_geometry;
     const std::size_t expected_latent =
@@ -172,6 +172,9 @@ VideoKvCache prefill_video_cache(
     ggml_backend::GraphContext graph_context(512u * 1024u * 1024u);
     ggml_context * ctx = graph_context.get();
     const std::int64_t tokens = sequence.video_tokens;
+    cache.initialize(resources.backend(), g.num_layers,
+                     static_cast<std::size_t>(tokens), g.num_heads,
+                     g.attn_head_dim);
     ggml_tensor * latent_input = ggml_new_tensor_3d(
         ctx, GGML_TYPE_BF16, sequence.latent_width,
         sequence.latent_height, g.latent_channels);
@@ -258,15 +261,11 @@ VideoKvCache prefill_video_cache(
                     "FastWAM Video Expert graph execution failed");
     }
 
-    VideoKvCache cache;
-    cache.tokens = static_cast<std::size_t>(tokens);
-    cache.layers.resize(g.num_layers);
     for (std::uint32_t layer = 0; layer < g.num_layers; ++layer) {
-        cache.layers[layer].key = ggml_backend::get_bf16(outputs[layer].key);
-        cache.layers[layer].value =
-            ggml_backend::get_bf16(outputs[layer].value);
+        ggml_backend_tensor_copy(outputs[layer].key, cache.key(layer));
+        ggml_backend_tensor_copy(outputs[layer].value, cache.value(layer));
     }
-    return cache;
+    ggml_backend_synchronize(resources.backend());
 }
 
 } // namespace wam::internal::fastwam
